@@ -630,9 +630,9 @@ else:
 
     # --- Ejecución técnica y credenciales ---
     with st.expander("🧰 Ejecución técnica (teléfono, correo, claves)", expanded=False):
-        st.warning(
-            "Las **claves** se guardan en una tabla separada con RLS. Aun así, **quedan en texto plano** en la base. "
-            "Recomendación: guardarlas en un **password manager** y aquí solo dejar referencia."
+        st.info(
+            "Registro interno de **cómo se creó** la cuenta: teléfono usado, correo creado y (si querés) claves. "
+            "Se guarda en **texto plano** y se protege por **RLS** (solo roles/usuarios autorizados)."
         )
         if st.button("Refrescar ejecución", key=f"ref_exec_{acc}"):
             st.cache_data.clear()
