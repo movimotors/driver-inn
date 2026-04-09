@@ -177,17 +177,17 @@ def render_account_create_form(
                 if tpi_pick:
                     cur = tpi_by_id.get(str(tpi_pick), {})
                     if not cur.get("portrait_photo_path"):
-                        st.error("A este dato le falta **foto tipo carnet (frente)**. Cargala en **Datos terceros** para poder asignarlo.")
+                        st.error("A este dato le falta **foto de rostro (tipo carnet)**. Cargala en **Datos terceros** para poder asignarlo.")
                     else:
                         # Preview: mostrar a quién se asigna (rostro + licencia)
                         with st.container(border=True):
-                            card_header("Vista previa del dato (inventario)", "#283593", "Confirmá que es la persona correcta antes de asignar.")
+                            card_header("Vista previa del dato (inventario)", "#283593", "Confirmá el rostro y la licencia antes de asignar.")
                             c1, c2, c3 = st.columns(3)
                             with c1:
                                 try:
                                     st.image(
                                         BytesIO(storage_download(token, cur["portrait_photo_path"])),
-                                        caption="Rostro (carnet)",
+                                        caption="Rostro",
                                         use_container_width=True,
                                     )
                                 except Exception:
@@ -369,7 +369,7 @@ def render_account_create_form(
         tpi_by_id = {str(r["id"]): r for r in tpi_rows}
         cur = tpi_by_id.get(str(tpi_pick), {})
         if not cur.get("portrait_photo_path"):
-            st.error("Formulario A: el dato seleccionado no tiene **foto tipo carnet (frente)**.")
+            st.error("Formulario A: el dato seleccionado no tiene **foto de rostro (tipo carnet)**.")
             return AccountCreateResult(created=False)
     if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo" and not (ssn_full or "").strip():
         st.error("Modalidad activación por cupo: ingresá el **Social/SSN completo**.")

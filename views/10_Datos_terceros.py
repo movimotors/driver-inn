@@ -342,7 +342,7 @@ else:
             _card_start("📷 Dorso de la licencia")
             _show_license_photo("", cur.get("photo_back_path"))
     with st.container(border=True):
-        _card_start("🪪 Foto tipo carnet (frente)", "Obligatoria para usar el dato en cuentas a nombre de tercero.")
+        _card_start("🪪 Foto de rostro (tipo carnet)", "Obligatoria para usar este dato en cuentas a nombre de tercero.")
         _show_license_photo("", cur.get("portrait_photo_path"))
     with st.container(border=True):
         _card_start("🔗 Cuentas delivery vinculadas", "Donde se usa esta identidad.")
@@ -450,7 +450,7 @@ if edit_ok:
                 with f2:
                     up_b = st.file_uploader("Licencia · Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
                 with f3:
-                    up_portrait = st.file_uploader("Carnet · Frente *", type=["jpg", "jpeg", "png", "webp"], key="np")
+                    up_portrait = st.file_uploader("Rostro (tipo carnet) *", type=["jpg", "jpeg", "png", "webp"], key="np")
 
             with st.container(border=True):
                 _card_start(
@@ -654,7 +654,7 @@ if edit_ok and rows:
                 with uf2:
                     u_b = st.file_uploader("Nuevo dorso", type=["jpg", "jpeg", "png", "webp"], key="ub")
                 with uf3:
-                    u_p = st.file_uploader("Nuevo carnet (frente)", type=["jpg", "jpeg", "png", "webp"], key="up")
+                    u_p = st.file_uploader("Nuevo rostro (tipo carnet)", type=["jpg", "jpeg", "png", "webp"], key="up")
 
             with st.container(border=True):
                 _card_start(
