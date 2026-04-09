@@ -446,39 +446,40 @@ def render_account_create_form(
         ins = sb.table("accounts").insert(payload).execute()
         new_aid = str(ins.data[0]["id"])
 
-            if schema_has_service_modality:
-                link_id = tpi_pick if mod_key == TERCERO_MODALITY else None
-                if mod_key == TERCERO_MODALITY:
-                    if not client_face:
-                        sb.table("accounts").delete().eq("id", new_aid).execute()
-                        st.error("Falta **foto del cliente solicitante** (rostro). Subila para poder asignar el dato de tercero.")
-                        return AccountCreateResult(created=False)
-                    if not link_id:
-                        sb.table("accounts").delete().eq("id", new_aid).execute()
-                        st.error("Falta seleccionar el **dato de tercero** del inventario.")
-                        return AccountCreateResult(created=False)
+        if schema_has_service_modality:
+            link_id = tpi_pick if mod_key == TERCERO_MODALITY else None
+            if mod_key == TERCERO_MODALITY:
+                if not client_face:
+                    sb.table("accounts").delete().eq("id", new_aid).execute()
+                    st.error("Falta **foto del cliente solicitante** (rostro). Subila para poder asignar el dato de tercero.")
+                    return AccountCreateResult(created=False)
+                if not link_id:
+                    sb.table("accounts").delete().eq("id", new_aid).execute()
+                    st.error("Falta seleccionar el **dato de tercero** del inventario.")
+                    return AccountCreateResult(created=False)
 
-                    # Guardar foto del cliente solicitante en storage (si existe el helper)
+                # Guardar foto del cliente solicitante en storage
+                client_face_path = None
+                try:
+                    ext_cf = normalize_image_ext(client_face.name)
+                    client_face_path = f"account-identity-links/{new_aid}/client_face.{ext_cf}"
+                    storage_upload(
+                        token,
+                        client_face_path,
+                        client_face.getvalue(),
+                        client_face.type or "image/jpeg",
+                    )
+                except Exception:
                     client_face_path = None
-                    try:
-                        ext_cf = normalize_image_ext(client_face.name)
-                        client_face_path = f"account-identity-links/{new_aid}/client_face.{ext_cf}"
-                        storage_upload(
-                            token,
-                            client_face_path,
-                            client_face.getvalue(),
-                            client_face.type or "image/jpeg",
-                        )
-                    except Exception:
-                        client_face_path = None
 
                 verr = validate_tercero_link(sb, new_aid, str(link_id))
                 if verr:
                     sb.table("accounts").delete().eq("id", new_aid).execute()
                     st.error(verr)
                     return AccountCreateResult(created=False)
-                    apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id), client_face_path)
-                else:
+
+                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id), client_face_path)
+            else:
                 apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
 
         if schema_has_solo_licencia and schema_has_service_modality and mod_key == SOLO_LICENCIA_MODALITY:
