@@ -1,4 +1,5 @@
 import sys
+from collections import Counter
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -15,10 +16,13 @@ from src.constants import (
     TPI_DATA_SEMAPHORE_HELP,
     TPI_DATA_SEMAPHORE_LABELS,
     TPI_DATA_SEMAPHORE_ORDER,
+    TPI_INVENTORY_BUCKET_COLOR,
+    TPI_INVENTORY_BUCKET_LABELS,
     TPI_WORKFLOW_LABELS,
     TPI_WORKFLOW_ORDER,
 )
 from src.db import get_client
+from src.tpi_account_linking import inventory_bucket
 from src.rbac import can_delete_datos_terceros, can_edit_datos_terceros, require_login
 from src.storage_api import storage_download, storage_remove, storage_upload
 
@@ -145,96 +149,6 @@ def _show_license_photo(label: str, path: str | None):
         st.warning(f"{label + ': ' if label else ''}No se pudo mostrar ({e})")
 
 
-def _norm_license_number(value: str) -> str:
-    """Comparar licencias sin espacios ni guiones (evita duplicados por formato)."""
-    return "".join(c for c in (value or "").strip().lower() if c.isalnum())
-
-
-def _prepare_account_ids_and_check_license_conflicts(
-    sb_client,
-    labels: dict,
-    raw_ids: list,
-    license_number: str,
-    exclude_identity_id: str | None,
-    data_semaphore: str | None = None,
-) -> tuple[list[str] | None, str | None]:
-    """
-    Devuelve (lista de account_id limpia, mensaje de error).
-    - No permite la misma cuenta dos veces en el multiselect.
-    - No permite vincular esta licencia a una cuenta que ya tiene **otra** ficha con el mismo nº de licencia.
-    - Bloquea si el registro ya está marcado Background malo o si se intenta combinar cuentas con ese semáforo.
-    """
-    if data_semaphore == "background_malo" and raw_ids:
-        return None, (
-            "Con semáforo **Background malo** no podés vincular cuentas. Quitá las cuentas de la lista o cambiá el semáforo."
-        )
-
-    if exclude_identity_id:
-        ir = (
-            sb_client.table("third_party_identities")
-            .select("data_semaphore")
-            .eq("id", exclude_identity_id)
-            .execute()
-        )
-        if ir.data and ir.data[0].get("data_semaphore") == "background_malo":
-            if raw_ids:
-                return None, (
-                    "Este dato está **bloqueado (Background malo)**. No se pueden añadir ni mantener vínculos a cuentas."
-                )
-
-    seen: set[str] = set()
-    clean: list[str] = []
-    for aid in raw_ids:
-        s = str(aid)
-        if s in seen:
-            return None, (
-                "Marcaste **la misma cuenta más de una vez**. Quitá el duplicado: una cuenta solo puede "
-                "vincularse una vez por ficha de datos terceros."
-            )
-        seen.add(s)
-        clean.append(s)
-
-    target = _norm_license_number(license_number)
-    if not target:
-        return clean, None
-
-    for aid in clean:
-        lr = sb_client.table("account_identity_links").select("identity_id").eq("account_id", aid).execute()
-        for link in lr.data or []:
-            oid = str(link["identity_id"])
-            if exclude_identity_id and oid == str(exclude_identity_id):
-                continue
-            ir = (
-                sb_client.table("third_party_identities")
-                .select("license_number,first_name,last_name")
-                .eq("id", oid)
-                .execute()
-            )
-            if not ir.data:
-                continue
-            other = ir.data[0]
-            if _norm_license_number(other.get("license_number") or "") != target:
-                continue
-            lbl = labels.get(aid, str(aid)[:8])
-            lic_disp = (other.get("license_number") or "").strip() or "—"
-            nom = f"{other.get('first_name', '')} {other.get('last_name', '')}".strip() or "otro registro"
-            return None, (
-                f"**No se puede guardar:** la cuenta **{lbl}** ya tiene vinculada una ficha distinta con el "
-                f"**mismo número de licencia** (`{lic_disp}`, {nom}). "
-                "Asignar de nuevo el mismo dato en esa cuenta duplicaría el uso; quitá esa cuenta de la lista o "
-                "revisá el registro existente."
-            )
-    return clean, None
-
-
-def _sync_links(identity_id: str, account_ids: list):
-    sb.table("account_identity_links").delete().eq("identity_id", identity_id).execute()
-    if not account_ids:
-        return
-    rows = [{"identity_id": identity_id, "account_id": aid} for aid in account_ids]
-    sb.table("account_identity_links").insert(rows).execute()
-
-
 def _delete_photos_if_any(row: dict):
     for key in ("photo_front_path", "photo_back_path"):
         p = row.get(key)
@@ -294,7 +208,6 @@ except Exception as e:
     )
     st.stop()
 
-acct_ids = [x[0] for x in acct_choices]
 acct_label = dict(acct_choices)
 cid_list = [x[0] for x in client_opts]
 cid_lab = dict(client_opts)
@@ -302,10 +215,43 @@ tid_list = [x[0] for x in tech_opts]
 tid_lab = dict(tech_opts)
 
 st.caption(
-    "Cada solicitud va ligada al **cliente** que pide el servicio y al **técnico** que lo ejecuta. "
-    "El **tablero Kanban** sirve para mover el estado del trámite. El **semáforo** indica si el dato es apto; "
-    "**Background malo** lo bloquea para siempre en cuentas nuevas."
+    "Este módulo es el **inventario** de licencias de terceros: ves qué fichas están **disponibles**, "
+    "cuáles ya están **asignadas** a una cuenta delivery y cuáles están **bloqueadas (dato malo)**. "
+    "La **asignación a la cuenta** se hace en **Cuentas** o en **Clientes → Nueva cuenta delivery**, "
+    "elegiendo modalidad *Cuenta a nombre de tercero* y la ficha disponible. "
+    "El **tablero Kanban** sigue el trámite con cliente y técnico."
 )
+
+# --- Resumen inventario (tarjetas) ---
+_bucket_counts = Counter(inventory_bucket(r, str(r["id"]), links_map) for r in rows)
+b1, b2, b3 = st.columns(3)
+with b1:
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='color:{TPI_INVENTORY_BUCKET_COLOR['disponible']};font-size:1.6rem;font-weight:700;'>"
+            f"{_bucket_counts.get('disponible', 0)}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"**{TPI_INVENTORY_BUCKET_LABELS['disponible']}**")
+        st.caption("Listos para vincular desde Cuentas / Clientes.")
+with b2:
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='color:{TPI_INVENTORY_BUCKET_COLOR['asignado']};font-size:1.6rem;font-weight:700;'>"
+            f"{_bucket_counts.get('asignado', 0)}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"**{TPI_INVENTORY_BUCKET_LABELS['asignado']}**")
+        st.caption("Ya tienen vínculo con al menos una cuenta.")
+with b3:
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='color:{TPI_INVENTORY_BUCKET_COLOR['malo']};font-size:1.6rem;font-weight:700;'>"
+            f"{_bucket_counts.get('malo', 0)}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"**{TPI_INVENTORY_BUCKET_LABELS['malo']}**")
+        st.caption("No reutilizar; el sistema bloquea nuevos vínculos.")
 
 malo_rows = [r for r in rows if _is_dato_malo(r)]
 if malo_rows:
@@ -333,8 +279,10 @@ for r in rows:
     acc_lbl = ", ".join(acct_label.get(a, str(a)[:8]) for a in accs[:3])
     if len(accs) > 3:
         acc_lbl += f" (+{len(accs) - 3})"
+    inv_key = inventory_bucket(r, iid, links_map)
     summary.append(
         {
+            "Inventario": TPI_INVENTORY_BUCKET_LABELS.get(inv_key, inv_key),
             "Nombre": f"{r.get('first_name', '')} {r.get('last_name', '')}".strip(),
             "Nº licencia": r.get("license_number"),
             "Cliente sol.": cid_lab.get(str(r.get("request_client_id")), "—"),
@@ -350,7 +298,7 @@ for r in rows:
     )
 st.subheader("Listado")
 with st.container(border=True):
-    st.caption("Vista rápida: solicitud, equipo, flujo, semáforo y cuentas vinculadas.")
+    st.caption("Vista rápida: inventario, solicitud, equipo, flujo, semáforo y cuentas vinculadas (desde Cuentas).")
     st.dataframe(
         [{k: v for k, v in s.items() if k != "_id"} for s in summary],
         use_container_width=True,
@@ -501,18 +449,13 @@ if edit_ok:
 
             with st.container(border=True):
                 _card_start(
-                    "5 · Cuentas y notas",
-                    "Podés vincular la misma licencia a **varias cuentas** (distintos clientes). "
-                    "No se permite repetir la **misma cuenta** ni usar el **mismo nº de licencia** dos veces en la misma cuenta.",
+                    "5 · Notas (sin vínculo a cuentas aquí)",
+                    "El inventario se carga acá; **la cuenta** se asocia en **Cuentas** o **Clientes → Nueva cuenta delivery** "
+                    "al elegir modalidad **Cuenta a nombre de tercero** y una ficha **disponible**.",
                 )
-                if n_sem == "background_malo":
-                    st.warning("**Background malo:** no se pueden vincular cuentas a este registro.")
-                n_accounts = st.multiselect(
-                    "Cuentas donde se asignará",
-                    options=acct_ids,
-                    format_func=lambda x: acct_label.get(x, str(x)),
-                    placeholder="Buscá por cliente o plataforma…",
-                    disabled=n_sem == "background_malo",
+                st.info(
+                    "No se vinculan cuentas en esta pantalla: así el control queda claro "
+                    "(disponible vs asignado) y coincide con el flujo de venta por cliente."
                 )
                 n_notes = st.text_area("Notas internas (opcional)", placeholder="Observaciones solo para el equipo…", height=100)
 
@@ -527,60 +470,49 @@ if edit_ok:
             elif not n_exp:
                 st.error("Indicá fecha de expiración.")
             else:
-                if n_sem == "background_malo":
-                    clean_accts: list = []
-                    assign_err = None
-                else:
-                    clean_accts, assign_err = _prepare_account_ids_and_check_license_conflicts(
-                        sb, acct_label, n_accounts, n_lic.strip(), None, n_sem
-                    )
-                if assign_err:
-                    st.error(assign_err)
-                else:
-                    extra_new = {
-                        "request_client_id": n_req_client,
-                        "assigned_technician_id": n_tech,
-                        "data_semaphore": n_sem,
-                        "workflow_status": TPI_WORKFLOW_ORDER[n_wf],
-                    }
-                    payload = _payload_from_form(
-                        n_fn,
-                        n_ln,
-                        n_addr,
-                        n_lic,
-                        n_st,
-                        n_iss_st,
-                        n_dob,
-                        n_iss_d,
-                        n_exp,
-                        n_notes,
-                        plat_vals,
-                        extra=extra_new,
-                    )
-                    try:
-                        ins = sb.table("third_party_identities").insert(payload).execute()
-                        new_id = str(ins.data[0]["id"])
-                        ext_f = "jpg"
-                        if up_f:
-                            ext_f = (up_f.name.rsplit(".", 1)[-1] if "." in up_f.name else "jpg").lower()
-                            if ext_f == "jpeg":
-                                ext_f = "jpg"
-                            pf = f"{new_id}/front.{ext_f}"
-                            storage_upload(token, pf, up_f.getvalue(), up_f.type or "image/jpeg")
-                            sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", new_id).execute()
-                        if up_b:
-                            ext_b = (up_b.name.rsplit(".", 1)[-1] if "." in up_b.name else "jpg").lower()
-                            if ext_b == "jpeg":
-                                ext_b = "jpg"
-                            pb = f"{new_id}/back.{ext_b}"
-                            storage_upload(token, pb, up_b.getvalue(), up_b.type or "image/jpeg")
-                            sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", new_id).execute()
-                        _sync_links(new_id, clean_accts or [])
-                        st.cache_data.clear()
-                        st.success("Registro creado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
+                extra_new = {
+                    "request_client_id": n_req_client,
+                    "assigned_technician_id": n_tech,
+                    "data_semaphore": n_sem,
+                    "workflow_status": TPI_WORKFLOW_ORDER[n_wf],
+                }
+                payload = _payload_from_form(
+                    n_fn,
+                    n_ln,
+                    n_addr,
+                    n_lic,
+                    n_st,
+                    n_iss_st,
+                    n_dob,
+                    n_iss_d,
+                    n_exp,
+                    n_notes,
+                    plat_vals,
+                    extra=extra_new,
+                )
+                try:
+                    ins = sb.table("third_party_identities").insert(payload).execute()
+                    new_id = str(ins.data[0]["id"])
+                    ext_f = "jpg"
+                    if up_f:
+                        ext_f = (up_f.name.rsplit(".", 1)[-1] if "." in up_f.name else "jpg").lower()
+                        if ext_f == "jpeg":
+                            ext_f = "jpg"
+                        pf = f"{new_id}/front.{ext_f}"
+                        storage_upload(token, pf, up_f.getvalue(), up_f.type or "image/jpeg")
+                        sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", new_id).execute()
+                    if up_b:
+                        ext_b = (up_b.name.rsplit(".", 1)[-1] if "." in up_b.name else "jpg").lower()
+                        if ext_b == "jpeg":
+                            ext_b = "jpg"
+                        pb = f"{new_id}/back.{ext_b}"
+                        storage_upload(token, pb, up_b.getvalue(), up_b.type or "image/jpeg")
+                        sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", new_id).execute()
+                    st.cache_data.clear()
+                    st.success("Registro creado en inventario. Vinculá la cuenta desde **Cuentas** o **Clientes**.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
 # --- Edición / baja ---
 if edit_ok and rows:
@@ -617,7 +549,8 @@ if edit_ok and rows:
             with st.container(border=True):
                 _card_start(
                     "0 · Solicitud y equipo",
-                    "Actualizá cliente, técnico, flujo y semáforo. **Background malo** vacía los vínculos a cuentas.",
+                    "Actualizá cliente, técnico, flujo y semáforo. **Background malo** quita los vínculos a cuentas (desde la BD). "
+                    "Los vínculos nuevos solo se gestionan en **Cuentas** / **Clientes**.",
                 )
                 u_req_client = st.selectbox(
                     "Cliente que hace la solicitud *",
@@ -711,19 +644,18 @@ if edit_ok and rows:
 
             with st.container(border=True):
                 _card_start(
-                    "5 · Cuentas y notas",
-                    "La misma cuenta no puede figurar dos veces ni compartir el mismo nº de licencia con otra ficha ya vinculada a esa cuenta.",
+                    "5 · Cuentas vinculadas (solo lectura) y notas",
+                    "Para cambiar la cuenta asociada, usá **Cuentas** o **Clientes** con modalidad a nombre de tercero.",
                 )
-                if cu_blocked or u_sem == "background_malo":
-                    st.warning("**Background malo:** no se permiten vínculos a cuentas. Guardá para limpiar vínculos existentes.")
                 linked = links_map.get(e_pick, [])
-                u_accounts = st.multiselect(
-                    "Cuentas asignadas",
-                    options=acct_ids,
-                    default=[x for x in linked if x in acct_ids],
-                    format_func=lambda x: acct_label.get(x, str(x)),
-                    disabled=cu_blocked or (u_sem == "background_malo"),
-                )
+                if linked:
+                    st.caption("Cuentas que usan esta ficha hoy:")
+                    for a in linked:
+                        st.write(f"· {acct_label.get(a, a)}")
+                else:
+                    st.caption("Sin cuenta vinculada — aparece como **disponible** en el inventario.")
+                if cu_blocked or u_sem == "background_malo":
+                    st.warning("**Background malo:** al guardar se eliminan los vínculos a cuentas de esta ficha.")
                 u_notes = st.text_area("Notas internas", value=cur.get("notes") or "", height=100)
 
             save = st.form_submit_button("Guardar cambios", type="primary", use_container_width=True)
@@ -733,58 +665,49 @@ if edit_ok and rows:
             elif not u_req_client:
                 st.error("Elegí el cliente de la solicitud.")
             else:
-                if u_sem == "background_malo":
-                    clean_edit = []
-                    assign_err_e = None
-                else:
-                    clean_edit, assign_err_e = _prepare_account_ids_and_check_license_conflicts(
-                        sb, acct_label, u_accounts, u_lic.strip(), e_pick, u_sem
-                    )
-                if assign_err_e:
-                    st.error(assign_err_e)
-                else:
-                    extra_u = {
-                        "request_client_id": u_req_client,
-                        "assigned_technician_id": u_tech,
-                        "data_semaphore": u_sem,
-                        "workflow_status": TPI_WORKFLOW_ORDER[u_wf],
-                    }
-                    upd = _payload_from_form(
-                        u_fn,
-                        u_ln,
-                        u_addr,
-                        u_lic,
-                        u_st,
-                        u_iss_st,
-                        u_dob,
-                        u_isd,
-                        u_exp,
-                        u_notes,
-                        u_plat,
-                        extra=extra_u,
-                    )
-                    try:
-                        sb.table("third_party_identities").update(upd).eq("id", e_pick).execute()
-                        if u_f:
-                            ext = (u_f.name.rsplit(".", 1)[-1] if "." in u_f.name else "jpg").lower()
-                            if ext == "jpeg":
-                                ext = "jpg"
-                            pf = f"{e_pick}/front.{ext}"
-                            storage_upload(token, pf, u_f.getvalue(), u_f.type or "image/jpeg")
-                            sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", e_pick).execute()
-                        if u_b:
-                            ext = (u_b.name.rsplit(".", 1)[-1] if "." in u_b.name else "jpg").lower()
-                            if ext == "jpeg":
-                                ext = "jpg"
-                            pb = f"{e_pick}/back.{ext}"
-                            storage_upload(token, pb, u_b.getvalue(), u_b.type or "image/jpeg")
-                            sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", e_pick).execute()
-                        _sync_links(e_pick, clean_edit or [])
-                        st.cache_data.clear()
-                        st.success("Actualizado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
+                extra_u = {
+                    "request_client_id": u_req_client,
+                    "assigned_technician_id": u_tech,
+                    "data_semaphore": u_sem,
+                    "workflow_status": TPI_WORKFLOW_ORDER[u_wf],
+                }
+                upd = _payload_from_form(
+                    u_fn,
+                    u_ln,
+                    u_addr,
+                    u_lic,
+                    u_st,
+                    u_iss_st,
+                    u_dob,
+                    u_isd,
+                    u_exp,
+                    u_notes,
+                    u_plat,
+                    extra=extra_u,
+                )
+                try:
+                    sb.table("third_party_identities").update(upd).eq("id", e_pick).execute()
+                    if u_sem == "background_malo":
+                        sb.table("account_identity_links").delete().eq("identity_id", e_pick).execute()
+                    if u_f:
+                        ext = (u_f.name.rsplit(".", 1)[-1] if "." in u_f.name else "jpg").lower()
+                        if ext == "jpeg":
+                            ext = "jpg"
+                        pf = f"{e_pick}/front.{ext}"
+                        storage_upload(token, pf, u_f.getvalue(), u_f.type or "image/jpeg")
+                        sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", e_pick).execute()
+                    if u_b:
+                        ext = (u_b.name.rsplit(".", 1)[-1] if "." in u_b.name else "jpg").lower()
+                        if ext == "jpeg":
+                            ext = "jpg"
+                        pb = f"{e_pick}/back.{ext}"
+                        storage_upload(token, pb, u_b.getvalue(), u_b.type or "image/jpeg")
+                        sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", e_pick).execute()
+                    st.cache_data.clear()
+                    st.success("Actualizado.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
         if delete_ok:
             if st.button("Eliminar registro y fotos", type="primary"):

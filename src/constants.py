@@ -48,8 +48,9 @@ SERVICE_MODALITY_LABELS = {
 
 SERVICE_MODALITY_HELP = {
     "cuenta_nombre_tercero": (
-        "Se crea la cuenta usando **datos de un tercero** (licencia registrada en Datos terceros). "
-        "Vinculá esa ficha a esta cuenta en el módulo correspondiente."
+        "Se crea la cuenta usando **datos de un tercero** (ficha en **Datos terceros**). "
+        "Elegí la ficha **disponible** al crear o editar la cuenta en **Cuentas** (o **Clientes → Nueva cuenta delivery**). "
+        "**Datos terceros** es el inventario; la asignación a la cuenta se hace desde ahí."
     ),
     "cliente_licencia_sin_social": (
         "El **cliente ya tiene licencia** pero **aún no tiene** número de seguro social (SSN) u otros datos sociales. "
@@ -101,6 +102,19 @@ TPI_WORKFLOW_LABELS = {
 }
 
 # Columnas del tablero (la primera es virtual: data_semaphore = background_malo)
+# Inventario (resumen operativo)
+TPI_INVENTORY_BUCKET_LABELS = {
+    "disponible": "Disponible — sin cuenta asignada",
+    "asignado": "Asignado — ya vinculado a cuenta(s)",
+    "malo": "Dato malo — Background bloqueado",
+}
+
+TPI_INVENTORY_BUCKET_COLOR = {
+    "disponible": "#1565C0",
+    "asignado": "#6A1B9A",
+    "malo": "#C62828",
+}
+
 TPI_KANBAN_COLUMNS = [
     ("dato_malo", "🚫 Dato malo (Background)"),
     ("solicitud", "📥 Solicitud"),

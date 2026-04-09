@@ -20,6 +20,16 @@ from src.constants import (
 )
 from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_TECNICO, require_login
+from src.tpi_account_linking import (
+    TERCERO_MODALITY,
+    apply_account_tercero_identity,
+    current_tercero_identity_id,
+    identity_option_label,
+    identity_rows_for_account_editor,
+    identity_selectable_for_new_account,
+    load_identities_and_links,
+    validate_tercero_link,
+)
 
 st.title("Cuentas delivery — semáforo de estado")
 
@@ -74,6 +84,14 @@ try:
 except Exception as e:
     st.error(f"Error al cargar datos: {e}")
     st.stop()
+
+tpi_rows: list = []
+links_by_i: dict = {}
+try:
+    tpi_rows, links_by_i, _ = load_identities_and_links(sb)
+except Exception:
+    pass
+tpi_by_id = {str(r["id"]): r for r in tpi_rows}
 
 if not schema_has_service_modality:
     st.warning(
@@ -130,6 +148,27 @@ if can_create:
                 st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
             else:
                 st.caption("Tras aplicar la migración 006 podrás guardar la modalidad.")
+            ter_new_opts = [
+                r
+                for r in tpi_rows
+                if identity_selectable_for_new_account(r, str(r["id"]), links_by_i)
+            ]
+            na_tpi_options: list = [None] + [str(r["id"]) for r in ter_new_opts]
+
+            def _fmt_na_tpi(x):
+                if x is None:
+                    return "— Sin elegir —"
+                return identity_option_label(tpi_by_id.get(str(x), {}))
+
+            st.selectbox(
+                "Dato de tercero (inventario)",
+                options=na_tpi_options,
+                format_func=_fmt_na_tpi,
+                help="Solo aparecen fichas **disponibles** (sin cuenta vinculada). Obligatorio si la modalidad es **Cuenta a nombre de tercero**.",
+                key="na_tpi",
+            )
+            if not ter_new_opts:
+                st.caption("No hay fichas disponibles en inventario: cargalas en **Datos terceros**.")
             sale_type = st.selectbox("Tipo", options=[x[0] for x in SALE_OPTIONS], format_func=lambda x: dict(SALE_OPTIONS)[x])
             status = st.selectbox(
                 "Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x]
@@ -147,28 +186,52 @@ if can_create:
             from datetime import timezone
 
             now = datetime.now(timezone.utc).isoformat()
-            payload = {
-                "client_id": client_id,
-                "platform_id": platform_id,
-                "sale_type": sale_type,
-                "status": status,
-                "technician_id": technician_id,
-                "external_ref": ext or None,
-                "requirements_notes": req_notes or None,
-            }
-            if schema_has_service_modality:
-                payload["service_modality"] = SERVICE_MODALITY_ORDER[modality_ix]
-            if technician_id:
-                payload["assigned_at"] = now
-            if sale_type == "alquiler" and rw and rw > 0:
-                payload["rental_weekly_amount"] = float(rw)
-            try:
-                sb.table("accounts").insert(payload).execute()
-                st.cache_data.clear()
-                st.success("Cuenta creada.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"No se pudo crear: {e}")
+            mod_key = SERVICE_MODALITY_ORDER[modality_ix] if schema_has_service_modality else None
+            na_tpi_pick = st.session_state.get("na_tpi")
+            if schema_has_service_modality and mod_key == TERCERO_MODALITY and not na_tpi_pick:
+                st.error("Con modalidad **Cuenta a nombre de tercero** tenés que elegir una ficha del inventario (disponible).")
+            else:
+                payload = {
+                    "client_id": client_id,
+                    "platform_id": platform_id,
+                    "sale_type": sale_type,
+                    "status": status,
+                    "technician_id": technician_id,
+                    "external_ref": ext or None,
+                    "requirements_notes": req_notes or None,
+                }
+                if schema_has_service_modality:
+                    payload["service_modality"] = mod_key
+                if technician_id:
+                    payload["assigned_at"] = now
+                if sale_type == "alquiler" and rw and rw > 0:
+                    payload["rental_weekly_amount"] = float(rw)
+                try:
+                    ins = sb.table("accounts").insert(payload).execute()
+                    new_aid = str(ins.data[0]["id"])
+                    if schema_has_service_modality:
+                        link_id = na_tpi_pick if mod_key == TERCERO_MODALITY else None
+                        if mod_key == TERCERO_MODALITY and link_id:
+                            verr = validate_tercero_link(sb, new_aid, str(link_id))
+                            if verr:
+                                sb.table("accounts").delete().eq("id", new_aid).execute()
+                                st.error(verr)
+                            else:
+                                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
+                                st.cache_data.clear()
+                                st.success("Cuenta creada y dato de tercero vinculado.")
+                                st.rerun()
+                        else:
+                            apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
+                            st.cache_data.clear()
+                            st.success("Cuenta creada.")
+                            st.rerun()
+                    else:
+                        st.cache_data.clear()
+                        st.success("Cuenta creada.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo crear: {e}")
 else:
     st.caption("Los técnicos no crean cuentas nuevas desde la app; solo actualizan las asignadas.")
 
@@ -200,6 +263,16 @@ else:
     except ValueError:
         mod_index = 0
 
+    cur_tid = current_tercero_identity_id(sb, acc) if tpi_rows else None
+    ter_edit_rows = identity_rows_for_account_editor(tpi_rows, links_by_i, acc, cur_tid)
+    ter_edit_ids: list = [None] + [str(r["id"]) for r in ter_edit_rows]
+    try:
+        tpi_ix = ter_edit_ids.index(cur_tid) if cur_tid and cur_tid in ter_edit_ids else 0
+    except ValueError:
+        tpi_ix = 0
+    safe_tpi_ix = min(tpi_ix, max(0, len(ter_edit_ids) - 1))
+    upd_tpi_key = f"ua_tpi_{acc}"
+
     with st.form("upd_account"):
         new_modality_ix = st.selectbox(
             "Modalidad de servicio",
@@ -213,6 +286,21 @@ else:
             st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[new_modality_ix]])
         else:
             st.caption("Migración 006 pendiente: la modalidad no se persiste.")
+        if schema_has_service_modality:
+
+            def _fmt_ua_tpi(x):
+                if x is None:
+                    return "— Sin vínculo —"
+                return identity_option_label(tpi_by_id.get(str(x), {}))
+
+            st.selectbox(
+                "Dato de tercero (inventario)",
+                options=ter_edit_ids,
+                index=safe_tpi_ix,
+                format_func=_fmt_ua_tpi,
+                help="Ficha vinculada a esta cuenta. Solo **disponibles** + la actual. Cambiá modalidad para quitar el vínculo.",
+                key=upd_tpi_key,
+            )
         new_status = st.selectbox(
             "Estado",
             options=[x[0] for x in STATUS_OPTIONS],
@@ -233,30 +321,51 @@ else:
         save = st.form_submit_button("Guardar cambios")
     if save:
         old_st = current["status"]
-        upd = {"status": new_status, "technician_id": new_tech}
-        if schema_has_service_modality:
-            upd["service_modality"] = SERVICE_MODALITY_ORDER[new_modality_ix]
-        from datetime import timezone
+        new_mod = (
+            SERVICE_MODALITY_ORDER[new_modality_ix]
+            if schema_has_service_modality
+            else (current.get("service_modality") or "cuenta_nombre_tercero")
+        )
+        upd_tpi = st.session_state.get(upd_tpi_key) if schema_has_service_modality else None
+        link_id = str(upd_tpi) if schema_has_service_modality and new_mod == TERCERO_MODALITY and upd_tpi else None
+        block = False
+        if schema_has_service_modality and new_mod == TERCERO_MODALITY and not upd_tpi:
+            st.error(
+                "Con modalidad **Cuenta a nombre de tercero** elegí una ficha del inventario o cargá una nueva en **Datos terceros**."
+            )
+            block = True
+        elif link_id:
+            verr = validate_tercero_link(sb, acc, link_id)
+            if verr:
+                st.error(verr)
+                block = True
+        if not block:
+            upd = {"status": new_status, "technician_id": new_tech}
+            if schema_has_service_modality:
+                upd["service_modality"] = new_mod
+            from datetime import timezone
 
-        if new_tech and not current.get("technician_id"):
-            upd["assigned_at"] = datetime.now(timezone.utc).isoformat()
-        if set_delivered and delivered:
-            upd["delivered_at"] = delivered.isoformat()
-        if set_rental_due and rental_due:
-            upd["rental_next_due_date"] = rental_due.isoformat()
-        try:
-            sb.table("accounts").update(upd).eq("id", acc).execute()
-            if old_st != new_status:
-                sb.table("account_status_events").insert(
-                    {
-                        "account_id": acc,
-                        "old_status": old_st,
-                        "new_status": new_status,
-                        "note": note_event or None,
-                    }
-                ).execute()
-            st.cache_data.clear()
-            st.success("Cuenta actualizada.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"No se pudo guardar: {e}")
+            if new_tech and not current.get("technician_id"):
+                upd["assigned_at"] = datetime.now(timezone.utc).isoformat()
+            if set_delivered and delivered:
+                upd["delivered_at"] = delivered.isoformat()
+            if set_rental_due and rental_due:
+                upd["rental_next_due_date"] = rental_due.isoformat()
+            try:
+                sb.table("accounts").update(upd).eq("id", acc).execute()
+                if schema_has_service_modality:
+                    apply_account_tercero_identity(sb, acc, new_mod, link_id)
+                if old_st != new_status:
+                    sb.table("account_status_events").insert(
+                        {
+                            "account_id": acc,
+                            "old_status": old_st,
+                            "new_status": new_status,
+                            "note": note_event or None,
+                        }
+                    ).execute()
+                st.cache_data.clear()
+                st.success("Cuenta actualizada.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo guardar: {e}")
