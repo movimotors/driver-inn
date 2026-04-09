@@ -63,9 +63,8 @@ def require_login():
         st.error("Configura Supabase (variables de entorno o secrets).")
         st.stop()
     if not is_logged_in():
-        st.warning("Iniciá sesión desde la página principal (**Home**).")
-        if st.button("Ir a inicio de sesión"):
-            st.switch_page("Home.py")
+        # Lleva a Home: ahí está el formulario de login (el menú lateral puede abrir otra página primero).
+        st.switch_page("Home.py")
         st.stop()
 
 

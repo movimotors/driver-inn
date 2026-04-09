@@ -52,15 +52,19 @@ Abre el navegador en la URL que muestre Streamlit (por defecto `http://localhost
 
 ## Streamlit Cloud (Secrets)
 
-En **App settings → Secrets**, por ejemplo:
+1. En el deploy, **Main file path** debe ser **`Home.py`** (si ponés solo una página de `pages/`, no verás el login en la raíz).
+2. **App settings → Secrets**, pegá por ejemplo:
 
 ```toml
 SUPABASE_URL = "https://xxxx.supabase.co"
-SUPABASE_KEY = "eyJ..."  # anon
+SUPABASE_KEY = "eyJ..."  # clave anon de Supabase
 
-# Opcional: URL a la que Supabase redirige tras el enlace del correo de recuperación
-# PASSWORD_RESET_REDIRECT_URL = "https://tu-app.streamlit.app"
+# Opcional — recuperación de contraseña (mismo archivo Secrets, línea extra):
+PASSWORD_RESET_REDIRECT_URL = "https://TU-APP.streamlit.app"
 ```
+
+3. **`PASSWORD_RESET_REDIRECT_URL` no se “activa” en otro lado**: solo existe si la agregás en **este mismo TOML de Secrets**. Es la URL pública de tu app (la que abre el visitante, con `https://`).
+4. En **Supabase → Authentication → URL configuration** tenés que **permitir** esa URL: en **Redirect URLs** agregá `https://TU-APP.streamlit.app/**` (o la URL exacta que uses). Si no, el enlace del correo de recuperación falla al volver a tu app.
 
 ## GitHub
 

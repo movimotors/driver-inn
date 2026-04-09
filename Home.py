@@ -24,10 +24,11 @@ st.title("Delivery Control")
 st.caption("Asesoría y gestión de cuentas delivery (USA)")
 
 if not supabase_configured():
-    st.warning(
-        "Configurá `SUPABASE_URL` y `SUPABASE_KEY` en `.env` o en **Secrets** de Streamlit Cloud."
+    st.error(
+        "**Faltan credenciales de Supabase.** Sin ellas no podés iniciar sesión. "
+        "En Streamlit Cloud: **App settings → Secrets** y agregá `SUPABASE_URL` y `SUPABASE_KEY` (clave **anon**). "
+        "Debajo igualmente podés ver el formulario de acceso; al intentar entrar verás el error hasta que guardes los Secrets."
     )
-    st.stop()
 
 with st.sidebar:
     if is_logged_in():
@@ -59,12 +60,16 @@ tab_login, tab_recover = st.tabs(["Iniciar sesión", "Olvidé mi contraseña"])
 
 with tab_login:
     st.subheader("Iniciar sesión")
+    if not supabase_configured():
+        st.caption("Completá **Secrets** con `SUPABASE_URL` y `SUPABASE_KEY` y recargá la app (~1 min después de guardar).")
     with st.form("login_form"):
         email = st.text_input("Correo", key="login_email")
         password = st.text_input("Contraseña", type="password", key="login_pw")
         go = st.form_submit_button("Entrar", type="primary")
     if go:
-        if not email.strip() or not password:
+        if not supabase_configured():
+            st.error("Configurá primero SUPABASE_URL y SUPABASE_KEY en Secrets (o .env en local).")
+        elif not email.strip() or not password:
             st.error("Completá correo y contraseña.")
         else:
             try:
@@ -103,7 +108,9 @@ with tab_recover:
         remail = st.text_input("Correo de la cuenta", key="recover_email")
         send = st.form_submit_button("Enviar enlace")
     if send:
-        if not remail.strip():
+        if not supabase_configured():
+            st.error("Configurá SUPABASE_URL y SUPABASE_KEY en Secrets antes de pedir el enlace.")
+        elif not remail.strip():
             st.error("Ingresá tu correo.")
         else:
             try:
