@@ -1,0 +1,10 @@
+# Tema Driver Inn: verde metálico + gris carbón (alineado a la marca)
+[theme]
+primaryColor = "#00B368"
+backgroundColor = "#FAFAF8"
+secondaryBackgroundColor = "#F0F2F0"
+textColor = "#2D3436"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

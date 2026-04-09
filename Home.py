@@ -11,7 +11,7 @@ from src.rbac import ROLE_LABELS, init_session_state, is_logged_in, logout
 from views.login_screen import render_auth_screen
 
 st.set_page_config(
-    page_title="Delivery Control",
+    page_title="Driver Inn",
     page_icon="🚚",
     layout="wide",
     initial_sidebar_state="expanded",

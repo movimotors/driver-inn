@@ -1,10 +1,14 @@
 """Pantalla exclusiva de acceso: login, registro y recuperación (sin menú de la app)."""
 
+from pathlib import Path
+
 import streamlit as st
 
 from src.auth_api import AuthError, request_password_recovery, sign_in_with_password, sign_up
-from src.config import get_supabase_config, supabase_configured
+from src.config import supabase_configured
 from src.rbac import fetch_profile_for_user
+
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo_driver_inn.png"
 
 
 def _hide_app_chrome():
@@ -18,6 +22,8 @@ def _hide_app_chrome():
         div[data-testid="stDecoration"] { display: none !important; }
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
+        .block-container { padding-top: 2rem !important; max-width: 520px !important; }
+        div[data-testid="stTabs"] button { border-radius: 8px 8px 0 0 !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -27,10 +33,18 @@ def _hide_app_chrome():
 def render_auth_screen():
     _hide_app_chrome()
 
-    c1, c2, c3 = st.columns([1, 2, 1])
+    c1, c2, c3 = st.columns([1, 2.2, 1])
     with c2:
-        st.title("Delivery Control")
-        st.caption("Iniciá sesión o registrate para continuar")
+        if _LOGO_PATH.is_file():
+            st.image(str(_LOGO_PATH), use_container_width=True)
+        else:
+            st.markdown("### Driver Inn")
+        st.markdown(
+            '<p style="color:#5c6368;font-size:1rem;margin-top:0.2rem;">'
+            "Gestión de cuentas delivery · Iniciá sesión o registrate"
+            "</p>",
+            unsafe_allow_html=True,
+        )
 
         if not supabase_configured():
             st.error(
