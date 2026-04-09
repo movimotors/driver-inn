@@ -96,45 +96,49 @@ def render_account_create_form(
         st.warning("Necesitás al menos un cliente y plataformas cargadas.")
         return AccountCreateResult(created=False)
 
-    with st.form(f"{key_prefix}_create_account"):
-        # Paso 1: Cliente + plataforma
-        with st.container(border=True):
-            card_header("1 · Cliente y plataforma", "#1565C0")
-            client_opts = [c["id"] for c in clients]
-            if preset_client_id and preset_client_id in client_opts:
-                client_id = st.selectbox(
-                    "Cliente",
-                    options=client_opts,
-                    format_func=lambda x: cid.get(x, str(x)),
-                    index=client_opts.index(preset_client_id),
-                    key=f"{key_prefix}_client",
-                )
-            else:
-                client_id = st.selectbox(
-                    "Cliente", options=client_opts, format_func=lambda x: cid.get(x, str(x)), key=f"{key_prefix}_client"
-                )
-            platform_id = st.selectbox(
-                "Plataforma",
-                options=[p["id"] for p in plats],
-                format_func=lambda x: pid.get(x, str(x)),
-                key=f"{key_prefix}_platform",
+    # IMPORTANTE (Streamlit): dentro de st.form los cambios NO rerenderizan el layout.
+    # Por eso, los selectores que cambian qué bloque se muestra van FUERA del formulario.
+    with st.container(border=True):
+        card_header("1 · Cliente y plataforma", "#1565C0")
+        client_opts = [c["id"] for c in clients]
+        if preset_client_id and preset_client_id in client_opts:
+            client_id = st.selectbox(
+                "Cliente",
+                options=client_opts,
+                format_func=lambda x: cid.get(x, str(x)),
+                index=client_opts.index(preset_client_id),
+                key=f"{key_prefix}_client",
             )
+        else:
+            client_id = st.selectbox(
+                "Cliente", options=client_opts, format_func=lambda x: cid.get(x, str(x)), key=f"{key_prefix}_client"
+            )
+        platform_id = st.selectbox(
+            "Plataforma",
+            options=[p["id"] for p in plats],
+            format_func=lambda x: pid.get(x, str(x)),
+            key=f"{key_prefix}_platform",
+        )
 
-        # Paso 2: Modalidad (se muestra help) + campos dinámicos
+    with st.container(border=True):
+        card_header("2 · Modalidad (elige un formulario)", "#6A1B9A")
+        client_default = client_id_default_modality.get(str(client_id)) or "cuenta_nombre_tercero"
+        mod_key, ix = _selectbox_modality(
+            key_prefix=key_prefix,
+            schema_has_service_modality=schema_has_service_modality,
+            client_default=client_default,
+            order=service_modality_order,
+            labels=service_modality_labels,
+        )
+        if schema_has_service_modality:
+            st.caption(service_modality_help[service_modality_order[ix]])
+        else:
+            st.caption("Migración de modalidades pendiente: se usará valor compatible por defecto.")
+
+    # Ahora sí: formulario de captura/creación (layout estable)
+    with st.form(f"{key_prefix}_create_account"):
         with st.container(border=True):
-            card_header("2 · Modalidad y datos necesarios", "#6A1B9A")
-            client_default = client_id_default_modality.get(str(client_id)) or "cuenta_nombre_tercero"
-            mod_key, ix = _selectbox_modality(
-                key_prefix=key_prefix,
-                schema_has_service_modality=schema_has_service_modality,
-                client_default=client_default,
-                order=service_modality_order,
-                labels=service_modality_labels,
-            )
-            if schema_has_service_modality:
-                st.caption(service_modality_help[service_modality_order[ix]])
-            else:
-                st.caption("Migración de modalidades pendiente: se usará valor compatible por defecto.")
+            card_header("3 · Formulario según modalidad", "#455A64", "Verás solo el bloque de la modalidad elegida arriba.")
 
             # 2a) Tercero: solo si corresponde
             tpi_pick = None
@@ -249,9 +253,9 @@ def render_account_create_form(
                 social_obtained = st.checkbox("¿Se consiguió Social (SSN)?", value=False, key=f"{key_prefix}_social")
                 ssn_full = st.text_input("Social/SSN (completo)", key=f"{key_prefix}_ssn_full")
 
-        # Paso 3: Operación (venta/alquiler, estado, técnico)
+        # Paso 4: Operación (venta/alquiler, estado, técnico)
         with st.container(border=True):
-            card_header("3 · Operación y asignación", "#EF6C00")
+            card_header("4 · Operación y asignación", "#EF6C00")
             sale_type = st.selectbox(
                 "Tipo", options=[x[0] for x in sale_options], format_func=lambda x: dict(sale_options)[x], key=f"{key_prefix}_sale"
             )
@@ -270,7 +274,7 @@ def render_account_create_form(
             quality_ok = st.checkbox("Cuenta OK (lista para entregar)", value=False, key=f"{key_prefix}_qok")
 
         with st.container(border=True):
-            card_header("4 · Notas", "#546E7A")
+            card_header("5 · Notas", "#546E7A")
             ext = st.text_input("Referencia externa", key=f"{key_prefix}_ext")
             req_notes = st.text_area("Notas de requisitos", key=f"{key_prefix}_req")
             rw = st.number_input(
