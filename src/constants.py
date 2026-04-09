@@ -33,6 +33,10 @@ ACCOUNT_STATUS_COLOR = {
 
 SALE_TYPE_LABELS = {"venta": "Venta", "alquiler": "Alquiler"}
 
+# Términos de pago (solo venta)
+PAYMENT_TERMS_ORDER = ["contado", "credito"]
+PAYMENT_TERMS_LABELS = {"contado": "Contado", "credito": "Crédito"}
+
 # --- Checklist de requisitos (por plataforma / modalidad) ---
 # Se guarda en accounts.requirements_checklist (jsonb). Por ahora es base; luego afinamos por caso.
 REQUIREMENTS_BASE = [

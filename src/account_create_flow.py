@@ -35,6 +35,7 @@ from src.tpi_account_linking import (
     validate_tercero_link,
 )
 from src.ui_cards import card_header
+from src.constants import PAYMENT_TERMS_LABELS, PAYMENT_TERMS_ORDER
 
 
 @dataclass
@@ -259,6 +260,22 @@ def render_account_create_form(
             sale_type = st.selectbox(
                 "Tipo", options=[x[0] for x in sale_options], format_func=lambda x: dict(sale_options)[x], key=f"{key_prefix}_sale"
             )
+            sale_price = 0.0
+            payment_terms = None
+            if sale_type == "venta":
+                sale_price = st.number_input(
+                    "Monto de venta",
+                    min_value=0.0,
+                    value=0.0,
+                    step=10.0,
+                    key=f"{key_prefix}_sale_price",
+                )
+                payment_terms = st.selectbox(
+                    "Forma de pago",
+                    options=PAYMENT_TERMS_ORDER,
+                    format_func=lambda x: PAYMENT_TERMS_LABELS.get(x, x),
+                    key=f"{key_prefix}_payment_terms",
+                )
             status = st.selectbox(
                 "Estado inicial",
                 options=[x[0] for x in status_options],
@@ -277,9 +294,15 @@ def render_account_create_form(
             card_header("5 · Notas", "#546E7A")
             ext = st.text_input("Referencia externa", key=f"{key_prefix}_ext")
             req_notes = st.text_area("Notas de requisitos", key=f"{key_prefix}_req")
-            rw = st.number_input(
-                "Monto alquiler semanal (solo si aplica)", min_value=0.0, value=0.0, step=1.0, key=f"{key_prefix}_rw"
-            )
+            rw = 0.0
+            if sale_type == "alquiler":
+                rw = st.number_input(
+                    "Monto alquiler semanal",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1.0,
+                    key=f"{key_prefix}_rw",
+                )
 
         submitted = st.form_submit_button("Crear cuenta", type="primary", use_container_width=True)
 
@@ -321,6 +344,14 @@ def render_account_create_form(
             st.error("Formulario C: subí la **foto del frente**.")
             return AccountCreateResult(created=False)
 
+    if sale_type == "venta":
+        if not sale_price or sale_price <= 0:
+            st.error("En **Venta**, el **monto de venta** es obligatorio (> 0).")
+            return AccountCreateResult(created=False)
+        if payment_terms not in PAYMENT_TERMS_ORDER:
+            st.error("En **Venta**, elegí forma de pago (contado o crédito).")
+            return AccountCreateResult(created=False)
+
     # Insert cuenta + vínculos
     from datetime import datetime, timezone
 
@@ -336,8 +367,10 @@ def render_account_create_form(
         "social_obtained": bool(social_obtained),
         "ssn_full": (ssn_full or "").strip() or None,
         "quality_ok": bool(quality_ok),
-        "requirements_checklist": ck_out,
     }
+    if sale_type == "venta":
+        payload["sale_price"] = float(sale_price)
+        payload["payment_terms"] = payment_terms
     if schema_has_service_modality:
         payload["service_modality"] = mod_key
     if technician_id:

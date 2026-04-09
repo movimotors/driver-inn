@@ -134,7 +134,7 @@ def clear_client_cache():
 
 
 _ACCOUNTS_LIST_COLS_V2 = (
-    "id, client_id, platform_id, technician_id, sale_type, status, service_modality, requirements_notes, "
+    "id, client_id, platform_id, technician_id, sale_type, sale_price, payment_terms, status, service_modality, requirements_notes, "
     "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
 )
 _ACCOUNTS_LIST_COLS_V1 = (
@@ -143,7 +143,7 @@ _ACCOUNTS_LIST_COLS_V1 = (
 )
 
 _ACCOUNTS_DASH_COLS_V2 = (
-    "id, status, sale_type, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, "
+    "id, status, sale_type, sale_price, payment_terms, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, "
     "platform_id, client_id, technician_id"
 )
 _ACCOUNTS_DASH_COLS_V1 = (
