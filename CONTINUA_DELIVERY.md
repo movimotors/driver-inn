@@ -1,6 +1,6 @@
-# Retomar el trabajo (Driver Inn)
+# Continúa — Delivery (Driver Inn)
 
-Usá este archivo cuando cortes la sesión (descanso, corte de luz, reinicio). **Antes de cerrar**, actualizá las secciones de abajo en 1 minuto. **Al volver**, abrí el proyecto en Cursor y pedí: *“Leé CONTINUE_AQUI.md y seguí”*.
+Usá este archivo cuando cortes la sesión (descanso, corte de luz, reinicio). **Antes de cerrar**, actualizá las secciones de abajo en 1 minuto. **Al volver**, abrí el proyecto en Cursor y pedí: *“Leé CONTINUA_DELIVERY.md y seguí”*.
 
 ## Estado rápido (editá esto al irte)
 
