@@ -1,6 +1,7 @@
-"""Formulario unificado de creación de cuentas (Cuentas / Clientes).
+"""Creación de cuentas por modalidad (bloques separados).
 
-Objetivo: evitar duplicación de lógica y mostrar solo lo relevante según modalidad.
+Nota: aunque sea un solo formulario, cada modalidad muestra SOLO su bloque,
+para evitar confusión y mensajes cruzados.
 """
 
 from __future__ import annotations
@@ -10,6 +11,13 @@ from typing import Any
 
 import streamlit as st
 
+from src.account_client_license import (
+    back_storage_path as client_back_path,
+    front_storage_path as client_front_path,
+    normalize_image_ext as client_norm_ext,
+    table_available as client_license_table_available,
+    upsert as upsert_client_license,
+)
 from src.account_solo_licencia import (
     SOLO_LICENCIA_MODALITY,
     back_storage_path,
@@ -27,7 +35,6 @@ from src.tpi_account_linking import (
     validate_tercero_link,
 )
 from src.ui_cards import card_header
-from src.requirements_checklist import checklist_template, merge_checklist
 
 
 @dataclass
@@ -83,6 +90,7 @@ def render_account_create_form(
 
     if schema_has_solo_licencia is None:
         schema_has_solo_licencia = solo_table_available(sb)
+    schema_has_client_license = client_license_table_available(sb)
 
     if not clients or not plats:
         st.warning("Necesitás al menos un cliente y plataformas cargadas.")
@@ -131,7 +139,8 @@ def render_account_create_form(
             # 2a) Tercero: solo si corresponde
             tpi_pick = None
             if schema_has_service_modality and mod_key == TERCERO_MODALITY:
-                st.markdown("**Cuenta a nombre de tercero** · Elegí una ficha disponible del inventario.")
+                st.markdown("**Formulario A · Cuenta a nombre de tercero**")
+                st.caption("Obligatorio: asignar un dato **disponible** del inventario.")
                 tpi_by_id = {str(r["id"]): r for r in tpi_rows}
                 ter_new_opts = [
                     r for r in tpi_rows if identity_selectable_for_new_account(r, str(r["id"]), links_by_i)
@@ -158,7 +167,27 @@ def render_account_create_form(
             sl_price = 0.0
             sl_notes = ""
             if schema_has_solo_licencia and schema_has_service_modality and mod_key == SOLO_LICENCIA_MODALITY:
-                st.markdown("**Solo licencia** · Subí foto(s) y registra el precio de venta.")
+                st.markdown("**Formulario B · Solo licencia**")
+                st.caption("Cargá los mismos datos de licencia que en terceros, pero como **licencia del cliente**.")
+                if not schema_has_client_license:
+                    st.warning("Falta migración **011**: `account_client_license_details`.")
+                b1, b2 = st.columns(2)
+                with b1:
+                    cl_fn = st.text_input("Nombre *", key=f"{key_prefix}_cl_fn")
+                with b2:
+                    cl_ln = st.text_input("Apellido *", key=f"{key_prefix}_cl_ln")
+                cl_addr = st.text_area("Dirección completa", key=f"{key_prefix}_cl_addr", height=88)
+                cl_dob = st.date_input("Fecha de nacimiento (opcional)", value=None, key=f"{key_prefix}_cl_dob")
+                cl_lic = st.text_input("Número de licencia *", key=f"{key_prefix}_cl_lic")
+                cl_status = st.selectbox(
+                    "Estado de la licencia",
+                    options=["vigente", "por_vencer", "vencida", "suspendida", "revocada", "en_tramite"],
+                    index=0,
+                    key=f"{key_prefix}_cl_status",
+                )
+                cl_iss = st.text_input("Estado emisor (EE. UU.)", max_chars=4, key=f"{key_prefix}_cl_iss")
+                cl_isd = st.date_input("Fecha de emisión (opcional)", value=None, key=f"{key_prefix}_cl_isd")
+                cl_exp = st.date_input("Fecha de expiración *", key=f"{key_prefix}_cl_exp")
                 sl_front = st.file_uploader(
                     "Foto frente de la licencia *",
                     type=["jpg", "jpeg", "png", "webp"],
@@ -182,9 +211,40 @@ def render_account_create_form(
             social_obtained = False
             ssn_full = ""
             if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo":
-                st.markdown("**Activación por cupo** · Aquí el SSN es parte del requisito.")
+                st.markdown("**Formulario C · Activación por cupo**")
+                st.caption("Cargá licencia + Social/SSN completo (provisto por el cliente).")
+                if not schema_has_client_license:
+                    st.warning("Falta migración **011**: `account_client_license_details`.")
+                c1, c2 = st.columns(2)
+                with c1:
+                    ac_fn = st.text_input("Nombre *", key=f"{key_prefix}_ac_fn")
+                with c2:
+                    ac_ln = st.text_input("Apellido *", key=f"{key_prefix}_ac_ln")
+                ac_addr = st.text_area("Dirección completa", key=f"{key_prefix}_ac_addr", height=88)
+                ac_dob = st.date_input("Fecha de nacimiento (opcional)", value=None, key=f"{key_prefix}_ac_dob")
+                ac_lic = st.text_input("Número de licencia *", key=f"{key_prefix}_ac_lic")
+                ac_status = st.selectbox(
+                    "Estado de la licencia",
+                    options=["vigente", "por_vencer", "vencida", "suspendida", "revocada", "en_tramite"],
+                    index=0,
+                    key=f"{key_prefix}_ac_status",
+                )
+                ac_iss = st.text_input("Estado emisor (EE. UU.)", max_chars=4, key=f"{key_prefix}_ac_iss")
+                ac_isd = st.date_input("Fecha de emisión (opcional)", value=None, key=f"{key_prefix}_ac_isd")
+                ac_exp = st.date_input("Fecha de expiración *", key=f"{key_prefix}_ac_exp")
+                ac_front = st.file_uploader(
+                    "Foto frente de la licencia *",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=f"{key_prefix}_ac_front",
+                )
+                ac_back = st.file_uploader(
+                    "Foto dorso (opcional)",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=f"{key_prefix}_ac_back",
+                )
                 social_obtained = st.checkbox("¿Social (SSN) ya conseguido?", value=True, key=f"{key_prefix}_social")
                 ssn_full = st.text_input("Social/SSN (completo) *", key=f"{key_prefix}_ssn_full")
+                ac_notes = st.text_area("Notas", key=f"{key_prefix}_ac_notes", height=72)
             else:
                 social_obtained = st.checkbox("¿Se consiguió Social (SSN)?", value=False, key=f"{key_prefix}_social")
                 ssn_full = st.text_input("Social/SSN (completo)", key=f"{key_prefix}_ssn_full")
@@ -210,14 +270,6 @@ def render_account_create_form(
             quality_ok = st.checkbox("Cuenta OK (lista para entregar)", value=False, key=f"{key_prefix}_qok")
 
         with st.container(border=True):
-            card_header("Checklist de requisitos", "#2E7D32", "Marcá lo que ya está listo para esta cuenta.")
-            tmpl = checklist_template(plat_code.get(platform_id), mod_key)
-            current_ck = merge_checklist({}, tmpl)
-            ck_out: dict[str, bool] = {}
-            for k, lbl in tmpl:
-                ck_out[k] = st.checkbox(lbl, value=bool(current_ck.get(k)), key=f"{key_prefix}_ck_{k}")
-
-        with st.container(border=True):
             card_header("4 · Notas", "#546E7A")
             ext = st.text_input("Referencia externa", key=f"{key_prefix}_ext")
             req_notes = st.text_area("Notas de requisitos", key=f"{key_prefix}_req")
@@ -239,10 +291,30 @@ def render_account_create_form(
         return AccountCreateResult(created=False)
     if schema_has_solo_licencia and schema_has_service_modality and mod_key == SOLO_LICENCIA_MODALITY:
         if not sl_front:
-            st.error("Modalidad solo licencia: subí la **foto del frente**.")
+            st.error("Formulario B: subí la **foto del frente**.")
+            return AccountCreateResult(created=False)
+        if not (st.session_state.get(f"{key_prefix}_cl_fn") or "").strip() or not (st.session_state.get(f"{key_prefix}_cl_ln") or "").strip():
+            st.error("Formulario B: nombre y apellido son obligatorios.")
+            return AccountCreateResult(created=False)
+        if not (st.session_state.get(f"{key_prefix}_cl_lic") or "").strip():
+            st.error("Formulario B: número de licencia es obligatorio.")
             return AccountCreateResult(created=False)
         if sale_type == "venta" and (not sl_price or sl_price <= 0):
-            st.error("Modalidad solo licencia en venta: ingresá el **precio cobrado** (> 0).")
+            st.error("Formulario B: en venta, indicá el **precio cobrado** (> 0).")
+            return AccountCreateResult(created=False)
+
+    if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo":
+        if not (ssn_full or "").strip():
+            st.error("Formulario C: Social/SSN **completo** es obligatorio.")
+            return AccountCreateResult(created=False)
+        if not (st.session_state.get(f"{key_prefix}_ac_fn") or "").strip() or not (st.session_state.get(f"{key_prefix}_ac_ln") or "").strip():
+            st.error("Formulario C: nombre y apellido son obligatorios.")
+            return AccountCreateResult(created=False)
+        if not (st.session_state.get(f"{key_prefix}_ac_lic") or "").strip():
+            st.error("Formulario C: número de licencia es obligatorio.")
+            return AccountCreateResult(created=False)
+        if not st.session_state.get(f"{key_prefix}_ac_front"):
+            st.error("Formulario C: subí la **foto del frente**.")
             return AccountCreateResult(created=False)
 
     # Insert cuenta + vínculos
@@ -295,6 +367,73 @@ def render_account_create_form(
                 back_path = back_storage_path(new_aid, ext_b)
                 storage_upload(token, back_path, sl_back.getvalue(), sl_back.type or "image/jpeg")
             upsert_solo_record(sb, new_aid, float(sl_price), sl_notes or None, fp, back_path)
+
+        # Guardar licencia del cliente (solo licencia / activación) en tabla separada (si existe)
+        if schema_has_client_license and schema_has_service_modality and mod_key in (
+            SOLO_LICENCIA_MODALITY,
+            "cliente_licencia_social_activacion_cupo",
+        ):
+            if mod_key == SOLO_LICENCIA_MODALITY:
+                front_file = sl_front
+                back_file = sl_back
+                form = {
+                    "first_name": (st.session_state.get(f"{key_prefix}_cl_fn") or "").strip(),
+                    "last_name": (st.session_state.get(f"{key_prefix}_cl_ln") or "").strip(),
+                    "address_line": (st.session_state.get(f"{key_prefix}_cl_addr") or "").strip() or None,
+                    "license_number": (st.session_state.get(f"{key_prefix}_cl_lic") or "").strip(),
+                    "license_status": st.session_state.get(f"{key_prefix}_cl_status") or "vigente",
+                    "license_issuing_state": (st.session_state.get(f"{key_prefix}_cl_iss") or "").strip() or None,
+                    "date_of_birth": st.session_state.get(f"{key_prefix}_cl_dob").isoformat()
+                    if st.session_state.get(f"{key_prefix}_cl_dob")
+                    else None,
+                    "license_issued_date": st.session_state.get(f"{key_prefix}_cl_isd").isoformat()
+                    if st.session_state.get(f"{key_prefix}_cl_isd")
+                    else None,
+                    "license_expiry_date": st.session_state.get(f"{key_prefix}_cl_exp").isoformat()
+                    if st.session_state.get(f"{key_prefix}_cl_exp")
+                    else None,
+                    "notes": (sl_notes or "").strip() or None,
+                }
+            else:
+                front_file = st.session_state.get(f"{key_prefix}_ac_front")
+                back_file = st.session_state.get(f"{key_prefix}_ac_back")
+                form = {
+                    "first_name": (st.session_state.get(f"{key_prefix}_ac_fn") or "").strip(),
+                    "last_name": (st.session_state.get(f"{key_prefix}_ac_ln") or "").strip(),
+                    "address_line": (st.session_state.get(f"{key_prefix}_ac_addr") or "").strip() or None,
+                    "license_number": (st.session_state.get(f"{key_prefix}_ac_lic") or "").strip(),
+                    "license_status": st.session_state.get(f"{key_prefix}_ac_status") or "vigente",
+                    "license_issuing_state": (st.session_state.get(f"{key_prefix}_ac_iss") or "").strip() or None,
+                    "date_of_birth": st.session_state.get(f"{key_prefix}_ac_dob").isoformat()
+                    if st.session_state.get(f"{key_prefix}_ac_dob")
+                    else None,
+                    "license_issued_date": st.session_state.get(f"{key_prefix}_ac_isd").isoformat()
+                    if st.session_state.get(f"{key_prefix}_ac_isd")
+                    else None,
+                    "license_expiry_date": st.session_state.get(f"{key_prefix}_ac_exp").isoformat()
+                    if st.session_state.get(f"{key_prefix}_ac_exp")
+                    else None,
+                    "notes": (st.session_state.get(f"{key_prefix}_ac_notes") or "").strip() or None,
+                }
+
+            ext_cf = client_norm_ext(front_file.name)
+            c_front = client_front_path(new_aid, ext_cf)
+            storage_upload(token, c_front, front_file.getvalue(), front_file.type or "image/jpeg")
+            c_back = None
+            if back_file:
+                ext_cb = client_norm_ext(back_file.name)
+                c_back = client_back_path(new_aid, ext_cb)
+                storage_upload(token, c_back, back_file.getvalue(), back_file.type or "image/jpeg")
+
+            upsert_client_license(
+                sb,
+                {
+                    "account_id": new_aid,
+                    **form,
+                    "photo_front_path": c_front,
+                    "photo_back_path": c_back,
+                },
+            )
 
         return AccountCreateResult(created=True, message="Cuenta creada.")
     except Exception as e:
