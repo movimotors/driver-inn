@@ -176,16 +176,16 @@ def render_account_create_form(
                 )
                 sl_notes = st.text_area("Notas", key=f"{key_prefix}_sl_notes", height=72)
 
-            # 2c) Activación: SSN requerido
+            # 2c) Social/SSN completo
             social_obtained = False
-            ssn_last4 = ""
+            ssn_full = ""
             if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo":
                 st.markdown("**Activación por cupo** · Aquí el SSN es parte del requisito.")
                 social_obtained = st.checkbox("¿Social (SSN) ya conseguido?", value=True, key=f"{key_prefix}_social")
-                ssn_last4 = st.text_input("SSN (últimos 4) *", max_chars=4, key=f"{key_prefix}_ssn4")
+                ssn_full = st.text_input("Social/SSN (completo) *", key=f"{key_prefix}_ssn_full")
             else:
                 social_obtained = st.checkbox("¿Se consiguió Social (SSN)?", value=False, key=f"{key_prefix}_social")
-                ssn_last4 = st.text_input("SSN (últimos 4)", max_chars=4, key=f"{key_prefix}_ssn4")
+                ssn_full = st.text_input("Social/SSN (completo)", key=f"{key_prefix}_ssn_full")
 
         # Paso 3: Operación (venta/alquiler, estado, técnico)
         with st.container(border=True):
@@ -224,8 +224,8 @@ def render_account_create_form(
     if schema_has_service_modality and mod_key == TERCERO_MODALITY and not tpi_pick:
         st.error("Modalidad a nombre de tercero: elegí una ficha **disponible** del inventario.")
         return AccountCreateResult(created=False)
-    if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo" and not (ssn_last4 or "").strip():
-        st.error("Modalidad activación por cupo: ingresá el **SSN (últimos 4)**.")
+    if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo" and not (ssn_full or "").strip():
+        st.error("Modalidad activación por cupo: ingresá el **Social/SSN completo**.")
         return AccountCreateResult(created=False)
     if schema_has_solo_licencia and schema_has_service_modality and mod_key == SOLO_LICENCIA_MODALITY:
         if not sl_front:
@@ -248,7 +248,7 @@ def render_account_create_form(
         "external_ref": ext or None,
         "requirements_notes": req_notes or None,
         "social_obtained": bool(social_obtained),
-        "ssn_last4": (ssn_last4 or "").strip() or None,
+        "ssn_full": (ssn_full or "").strip() or None,
         "quality_ok": bool(quality_ok),
     }
     if schema_has_service_modality:

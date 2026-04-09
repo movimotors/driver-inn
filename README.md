@@ -37,12 +37,13 @@ update public.profiles set role = 'superusuario' where id = '<uuid del usuario>'
 6. **SQL Editor**: [`supabase/migration_006_account_service_modality.sql`](supabase/migration_006_account_service_modality.sql) — columna **`service_modality`** en `accounts` (cuenta a nombre de tercero / licencia sin SSN / licencia + SSN y activación por cupo).
 7. **SQL Editor**: [`supabase/migration_007_third_party_workflow.sql`](supabase/migration_007_third_party_workflow.sql) — datos terceros: **cliente solicitud**, **técnico asignado**, **workflow** (Kanban), **semáforo** (incl. Background malo), trigger anti-vínculos si el dato está malo.
 8. **SQL Editor**: [`supabase/migration_008_account_solo_licencia.sql`](supabase/migration_008_account_solo_licencia.sql) — modalidad **solo licencia** (`cliente_licencia_sin_social`): tabla **`account_solo_licencia_records`** (foto(s) en Storage + **precio de venta** por cuenta).
-9. **SQL Editor**: [`supabase/migration_009_client_defaults_and_account_execution.sql`](supabase/migration_009_client_defaults_and_account_execution.sql) — clientes: **modalidad por defecto**. cuentas: **social obtenido**, **SSN last4**, **OK**. técnico: **teléfono**, **correo**, y (opcional) **credenciales** en tabla separada.
-10. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
-11. **Authentication → URL configuration**:
+9. **SQL Editor**: [`supabase/migration_009_client_defaults_and_account_execution.sql`](supabase/migration_009_client_defaults_and_account_execution.sql) — clientes: **modalidad por defecto**. cuentas: **social obtenido**, **SSN** y **OK**. técnico: **teléfono**, **correo**, y (opcional) **credenciales** en tabla separada.
+10. **SQL Editor**: [`supabase/migration_010_accounts_ssn_full.sql`](supabase/migration_010_accounts_ssn_full.sql) — reemplaza **SSN last4** por **Social/SSN completo** (texto plano) en `accounts`.
+11. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
+12. **Authentication → URL configuration**:
    - **Site URL**: en producción, ponelá la URL pública de Streamlit (`https://TU-APP.streamlit.app`), no `localhost`, si los usuarios confirman correo desde el celular u otro equipo.
    - **Redirect URLs**: añadí esa misma URL (y `http://localhost:8501` si probás en local). Aplica a **recuperación de contraseña** y a **confirmar registro por correo**.
-12. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
+13. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
 
 ## Configuración local
 
@@ -106,6 +107,7 @@ git push -u origin main
 | `supabase/migration_007_third_party_workflow.sql` | Datos terceros: cliente, técnico, Kanban, semáforo Background malo |
 | `supabase/migration_008_account_solo_licencia.sql` | Solo licencia: registro por cuenta (fotos + precio venta) |
 | `supabase/migration_009_client_defaults_and_account_execution.sql` | Cliente: modalidad default. Cuenta: social/OK. Técnico: ejecución + credenciales |
+| `supabase/migration_010_accounts_ssn_full.sql` | Cuenta: Social/SSN completo (texto plano) |
 
 ## Próximos pasos sugeridos
 

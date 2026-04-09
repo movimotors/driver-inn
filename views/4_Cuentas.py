@@ -318,11 +318,10 @@ else:
                 value=bool(current.get("social_obtained") or False),
                 key=f"ua_social_{acc}",
             )
-            ua_ssn4 = st.text_input(
-                "SSN (últimos 4)",
-                value=(current.get("ssn_last4") or ""),
-                max_chars=4,
-                key=f"ua_ssn4_{acc}",
+            ua_ssn_full = st.text_input(
+                "Social/SSN (completo)",
+                value=(current.get("ssn_full") or current.get("ssn_last4") or ""),
+                key=f"ua_ssn_full_{acc}",
             )
             ua_quality_ok = st.checkbox(
                 "Cuenta OK (lista para entregar)",
@@ -399,7 +398,7 @@ else:
             if schema_has_service_modality:
                 upd["service_modality"] = new_mod
             upd["social_obtained"] = bool(st.session_state.get(f"ua_social_{acc}"))
-            upd["ssn_last4"] = (st.session_state.get(f"ua_ssn4_{acc}") or "").strip() or None
+            upd["ssn_full"] = (st.session_state.get(f"ua_ssn_full_{acc}") or "").strip() or None
             upd["quality_ok"] = bool(st.session_state.get(f"ua_qok_{acc}"))
             from datetime import timezone
 
