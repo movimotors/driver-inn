@@ -174,6 +174,9 @@ if can_create:
     if not clients or not plats:
         st.warning("Necesitás al menos un cliente y plataformas cargadas.")
     else:
+        preset_client = st.session_state.pop("prefill_account_create_client_id", None)
+        if preset_client:
+            st.info("Cliente recién creado: completá ahora el formulario de cuenta según su modalidad.")
         with st.container(border=True):
             card_header(
                 "Crear cuenta (paso a paso)",
@@ -197,6 +200,7 @@ if can_create:
             links_by_i=links_by_i,
             status_options=STATUS_OPTIONS,
             sale_options=SALE_OPTIONS,
+            preset_client_id=str(preset_client) if preset_client else None,
         )
         if res.created:
             st.cache_data.clear()

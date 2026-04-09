@@ -15,12 +15,9 @@ from src.constants import (
     SERVICE_MODALITY_LABELS,
     SERVICE_MODALITY_ORDER,
 )
-from src.account_solo_licencia import solo_table_available
 from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_ADMIN, ROLE_SUPER, ROLE_VENDEDOR, require_roles
 from src.tpi_account_linking import load_identities_and_links
-from src.account_create_flow import render_account_create_form
-from src.ui_cards import card_header
 
 st.title("Clientes")
 
@@ -67,61 +64,10 @@ client_default_mod = {str(c["id"]): c.get("default_service_modality") for c in r
 try:
     techs, plats = load_techs_plats(token)
     _, schema_has_service_modality = load_accounts_schema(token)
-    tpi_rows, links_by_i, _ = load_identities_and_links(sb)
 except Exception:
     techs, plats = [], []
     schema_has_service_modality = False
-    tpi_rows, links_by_i = [], {}
-schema_has_solo_licencia = solo_table_available(sb)
-tpi_by_id = {str(r["id"]): r for r in tpi_rows}
-tid = {t["id"]: t["name"] for t in techs}
-pid = {p["id"]: p["name"] for p in plats}
-STATUS_OPTIONS = [(s, ACCOUNT_STATUS_LABELS[s]) for s in ACCOUNT_STATUS_ORDER]
-SALE_OPTIONS = [("venta", "Venta"), ("alquiler", "Alquiler")]
 
-with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", expanded=False):
-    st.markdown(
-        "Creá la **cuenta** ya asociada al cliente elegido. Si la modalidad es **Cuenta a nombre de tercero**, "
-        "elegí una ficha **disponible** del inventario (la misma lógica que en **Cuentas**)."
-    )
-    if not rows or not plats:
-        st.warning("Necesitás al menos un **cliente** (arriba) y **plataformas** cargadas en el sistema.")
-    else:
-        pre_client = st.selectbox(
-            "Cliente de la nueva cuenta",
-            options=[c["id"] for c in rows],
-            format_func=lambda x: cid.get(x, str(x)),
-            key="cl_pre_client",
-        )
-        with st.container(border=True):
-            card_header(
-                "Crear cuenta para este cliente",
-                "#1E88E5",
-                "Se preselecciona la modalidad por defecto del cliente y se muestran solo los campos necesarios.",
-            )
-        res = render_account_create_form(
-            sb=sb,
-            token=token,
-            key_prefix="clientes",
-            schema_has_service_modality=schema_has_service_modality,
-            schema_has_solo_licencia=schema_has_solo_licencia,
-            service_modality_order=SERVICE_MODALITY_ORDER,
-            service_modality_labels=SERVICE_MODALITY_LABELS,
-            service_modality_help=SERVICE_MODALITY_HELP,
-            clients=rows,
-            client_id_default_modality=client_default_mod,
-            plats=plats,
-            techs=techs,
-            tpi_rows=tpi_rows,
-            links_by_i=links_by_i,
-            status_options=STATUS_OPTIONS,
-            sale_options=SALE_OPTIONS,
-            preset_client_id=str(pre_client),
-        )
-        if res.created:
-            st.cache_data.clear()
-            st.success(res.message or "Cuenta creada.")
-            st.rerun()
 
 with st.expander("Nuevo cliente"):
     with st.form("new_client"):
@@ -142,7 +88,7 @@ with st.expander("Nuevo cliente"):
         if not name.strip():
             st.warning("El nombre es obligatorio.")
         else:
-            sb.table("clients").insert(
+            ins = sb.table("clients").insert(
                 {
                     "name": name.strip(),
                     "email": email or None,
@@ -152,8 +98,11 @@ with st.expander("Nuevo cliente"):
                 }
             ).execute()
             st.cache_data.clear()
-            st.success("Cliente creado.")
-            st.rerun()
+            new_id = str(ins.data[0]["id"]) if ins.data else None
+            if new_id:
+                st.session_state["prefill_account_create_client_id"] = new_id
+            st.success("Cliente creado. Continuá en **Cuentas** para crear la cuenta según la modalidad.")
+            st.switch_page("views/4_Cuentas.py")
 
 with st.expander("✏️ Editar modalidad por defecto del cliente", expanded=False):
     if not rows:
