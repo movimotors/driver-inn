@@ -26,6 +26,7 @@ from src.tpi_account_linking import (
     identity_selectable_for_new_account,
     validate_tercero_link,
 )
+from src.ui_cards import card_header
 
 
 @dataclass
@@ -88,7 +89,7 @@ def render_account_create_form(
     with st.form(f"{key_prefix}_create_account"):
         # Paso 1: Cliente + plataforma
         with st.container(border=True):
-            st.markdown("##### 1 · Cliente y plataforma")
+            card_header("1 · Cliente y plataforma", "#1565C0")
             client_opts = [c["id"] for c in clients]
             if preset_client_id and preset_client_id in client_opts:
                 client_id = st.selectbox(
@@ -111,7 +112,7 @@ def render_account_create_form(
 
         # Paso 2: Modalidad (se muestra help) + campos dinámicos
         with st.container(border=True):
-            st.markdown("##### 2 · Modalidad y datos necesarios")
+            card_header("2 · Modalidad y datos necesarios", "#6A1B9A")
             client_default = client_id_default_modality.get(str(client_id)) or "cuenta_nombre_tercero"
             mod_key, ix = _selectbox_modality(
                 key_prefix=key_prefix,
@@ -128,6 +129,7 @@ def render_account_create_form(
             # 2a) Tercero: solo si corresponde
             tpi_pick = None
             if schema_has_service_modality and mod_key == TERCERO_MODALITY:
+                st.markdown("**Cuenta a nombre de tercero** · Elegí una ficha disponible del inventario.")
                 tpi_by_id = {str(r["id"]): r for r in tpi_rows}
                 ter_new_opts = [
                     r for r in tpi_rows if identity_selectable_for_new_account(r, str(r["id"]), links_by_i)
@@ -154,7 +156,7 @@ def render_account_create_form(
             sl_price = 0.0
             sl_notes = ""
             if schema_has_solo_licencia and schema_has_service_modality and mod_key == SOLO_LICENCIA_MODALITY:
-                st.markdown("###### Solo licencia: evidencia y precio")
+                st.markdown("**Solo licencia** · Subí foto(s) y registra el precio de venta.")
                 sl_front = st.file_uploader(
                     "Foto frente de la licencia *",
                     type=["jpg", "jpeg", "png", "webp"],
@@ -178,6 +180,7 @@ def render_account_create_form(
             social_obtained = False
             ssn_last4 = ""
             if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo":
+                st.markdown("**Activación por cupo** · Aquí el SSN es parte del requisito.")
                 social_obtained = st.checkbox("¿Social (SSN) ya conseguido?", value=True, key=f"{key_prefix}_social")
                 ssn_last4 = st.text_input("SSN (últimos 4) *", max_chars=4, key=f"{key_prefix}_ssn4")
             else:
@@ -186,7 +189,7 @@ def render_account_create_form(
 
         # Paso 3: Operación (venta/alquiler, estado, técnico)
         with st.container(border=True):
-            st.markdown("##### 3 · Operación y asignación")
+            card_header("3 · Operación y asignación", "#EF6C00")
             sale_type = st.selectbox(
                 "Tipo", options=[x[0] for x in sale_options], format_func=lambda x: dict(sale_options)[x], key=f"{key_prefix}_sale"
             )
@@ -205,7 +208,7 @@ def render_account_create_form(
             quality_ok = st.checkbox("Cuenta OK (lista para entregar)", value=False, key=f"{key_prefix}_qok")
 
         with st.container(border=True):
-            st.markdown("##### 4 · Notas")
+            card_header("4 · Notas", "#546E7A")
             ext = st.text_input("Referencia externa", key=f"{key_prefix}_ext")
             req_notes = st.text_area("Notas de requisitos", key=f"{key_prefix}_req")
             rw = st.number_input(

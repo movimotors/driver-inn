@@ -43,6 +43,7 @@ from src.tpi_account_linking import (
     validate_tercero_link,
 )
 from src.account_create_flow import render_account_create_form
+from src.ui_cards import card_header
 
 st.title("Cuentas delivery — semáforo de estado")
 
@@ -171,6 +172,12 @@ if can_create:
     if not clients or not plats:
         st.warning("Necesitás al menos un cliente y plataformas cargadas.")
     else:
+        with st.container(border=True):
+            card_header(
+                "Crear cuenta (paso a paso)",
+                "#1E88E5",
+                "El formulario muestra solo lo necesario según la **modalidad** del cliente/cuenta.",
+            )
         res = render_account_create_form(
             sb=sb,
             token=token,
@@ -305,7 +312,7 @@ else:
         rental_due = st.date_input("Próximo vencimiento alquiler", value=None) if set_rental_due else None
         note_event = st.text_input("Nota del cambio (auditoría)")
         with st.container(border=True):
-            st.markdown("##### Social (SSN) y calidad")
+            card_header("Social (SSN) y calidad", "#00897B")
             ua_social = st.checkbox(
                 "¿Se consiguió Social (SSN) para esta cuenta?",
                 value=bool(current.get("social_obtained") or False),
@@ -334,7 +341,7 @@ else:
         ua_sl_b = None
         if show_sl:
             with st.container(border=True):
-                st.markdown("##### Registro **solo licencia**")
+                card_header("Registro solo licencia", "#6A1B9A")
                 ua_sl_price = st.number_input(
                     "Precio de venta cobrado",
                     min_value=0.0,
@@ -477,6 +484,8 @@ else:
             cred = {}
 
         with st.form(f"exec_{acc}"):
+            with st.container(border=True):
+                card_header("Teléfono y correo", "#5E35B1")
             ph = st.text_input("Teléfono usado", value=aed.get("phone_number") or "")
             ps = st.selectbox(
                 "Origen del teléfono",
@@ -488,6 +497,8 @@ else:
             )
             em = st.text_input("Correo creado para la cuenta", value=aed.get("email_created") or "")
             st.divider()
+            with st.container(border=True):
+                card_header("Claves (texto plano)", "#BF360C")
             email_login = st.text_input("Login del correo (si es distinto)", value=cred.get("email_login") or "")
             email_pass = st.text_input("Clave del correo", value=cred.get("email_password") or "", type="password")
             app_pass = st.text_input("Clave de la app/plataforma", value=cred.get("app_password") or "", type="password")

@@ -20,6 +20,7 @@ from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_ADMIN, ROLE_SUPER, ROLE_VENDEDOR, require_roles
 from src.tpi_account_linking import load_identities_and_links
 from src.account_create_flow import render_account_create_form
+from src.ui_cards import card_header
 
 st.title("Clientes")
 
@@ -92,6 +93,12 @@ with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", e
             format_func=lambda x: cid.get(x, str(x)),
             key="cl_pre_client",
         )
+        with st.container(border=True):
+            card_header(
+                "Crear cuenta para este cliente",
+                "#1E88E5",
+                "Se preselecciona la modalidad por defecto del cliente y se muestran solo los campos necesarios.",
+            )
         res = render_account_create_form(
             sb=sb,
             token=token,
