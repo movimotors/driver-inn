@@ -11,6 +11,7 @@ import streamlit as st
 from src.config import supabase_configured
 from src.constants import ACCOUNT_STATUS_COLOR, ACCOUNT_STATUS_LABELS, ACCOUNT_STATUS_ORDER, SALE_TYPE_LABELS
 from src.db import get_client
+from src.rbac import ROLE_TECNICO, require_login
 
 st.set_page_config(page_title="Cuentas", layout="wide")
 st.title("Cuentas delivery — semáforo de estado")
@@ -19,24 +20,29 @@ if not supabase_configured():
     st.error("Configura `.env` con Supabase.")
     st.stop()
 
-sb = get_client()
+require_login()
+token = st.session_state.access_token
+sb = get_client(token)
 
 STATUS_OPTIONS = [(s, ACCOUNT_STATUS_LABELS[s]) for s in ACCOUNT_STATUS_ORDER]
 SALE_OPTIONS = [("venta", "Venta"), ("alquiler", "Alquiler")]
+can_create = st.session_state.user_role != ROLE_TECNICO
 
 
 @st.cache_data(ttl=30)
-def load_lookups():
-    clients = (sb.table("clients").select("id,name").order("name").execute().data) or []
-    techs = (sb.table("technicians").select("id,name,active").eq("active", True).order("name").execute().data) or []
-    plats = (sb.table("delivery_platforms").select("id,name,code").eq("active", True).order("name").execute().data) or []
+def load_lookups(_token: str):
+    c = get_client(_token)
+    clients = (c.table("clients").select("id,name").order("name").execute().data) or []
+    techs = (c.table("technicians").select("id,name,active").eq("active", True).order("name").execute().data) or []
+    plats = (c.table("delivery_platforms").select("id,name,code").eq("active", True).order("name").execute().data) or []
     return clients, techs, plats
 
 
 @st.cache_data(ttl=30)
-def load_accounts_full():
+def load_accounts_full(_token: str):
+    c = get_client(_token)
     r = (
-        sb.table("accounts")
+        c.table("accounts")
         .select(
             "id, client_id, platform_id, technician_id, sale_type, status, requirements_notes, "
             "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
@@ -57,8 +63,13 @@ if st.button("Refrescar"):
     st.cache_data.clear()
     st.rerun()
 
-clients, techs, plats = load_lookups()
-accounts = load_accounts_full()
+try:
+    clients, techs, plats = load_lookups(token)
+    accounts = load_accounts_full(token)
+except Exception as e:
+    st.error(f"Error al cargar datos: {e}")
+    st.stop()
+
 cid = {c["id"]: c["name"] for c in clients}
 tid = {t["id"]: t["name"] for t in techs}
 pid = {p["id"]: p["name"] for p in plats}
@@ -84,49 +95,61 @@ for row in accounts:
         st.caption(row["requirements_notes"][:200] + ("…" if len(row["requirements_notes"] or "") > 200 else ""))
     st.divider()
 
-st.subheader("Nueva cuenta")
-with st.form("new_account"):
-    client_id = st.selectbox("Cliente", options=[c["id"] for c in clients], format_func=lambda x: cid[x], key="na_c")
-    platform_id = st.selectbox(
-        "Plataforma", options=[p["id"] for p in plats], format_func=lambda x: pid[x], key="na_p"
-    )
-    sale_type = st.selectbox("Tipo", options=[x[0] for x in SALE_OPTIONS], format_func=lambda x: dict(SALE_OPTIONS)[x])
-    status = st.selectbox("Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x])
-    technician_id = st.selectbox(
-        "Técnico (opcional)",
-        options=[None] + [t["id"] for t in techs],
-        format_func=lambda x: "—" if x is None else tid[x],
-    )
-    ext = st.text_input("Referencia externa")
-    req_notes = st.text_area("Notas de requisitos")
-    rw = st.number_input("Monto alquiler semanal (solo si aplica)", min_value=0.0, value=0.0, step=1.0)
-    submitted = st.form_submit_button("Crear cuenta")
-if submitted:
-    from datetime import timezone
+if can_create:
+    st.subheader("Nueva cuenta")
+    if not clients or not plats:
+        st.warning("Necesitás al menos un cliente y plataformas cargadas.")
+    else:
+        with st.form("new_account"):
+            client_id = st.selectbox("Cliente", options=[c["id"] for c in clients], format_func=lambda x: cid[x], key="na_c")
+            platform_id = st.selectbox(
+                "Plataforma", options=[p["id"] for p in plats], format_func=lambda x: pid[x], key="na_p"
+            )
+            sale_type = st.selectbox("Tipo", options=[x[0] for x in SALE_OPTIONS], format_func=lambda x: dict(SALE_OPTIONS)[x])
+            status = st.selectbox(
+                "Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x]
+            )
+            technician_id = st.selectbox(
+                "Técnico (opcional)",
+                options=[None] + [t["id"] for t in techs],
+                format_func=lambda x: "—" if x is None else tid[x],
+            )
+            ext = st.text_input("Referencia externa")
+            req_notes = st.text_area("Notas de requisitos")
+            rw = st.number_input("Monto alquiler semanal (solo si aplica)", min_value=0.0, value=0.0, step=1.0)
+            submitted = st.form_submit_button("Crear cuenta")
+        if submitted:
+            from datetime import timezone
 
-    now = datetime.now(timezone.utc).isoformat()
-    payload = {
-        "client_id": client_id,
-        "platform_id": platform_id,
-        "sale_type": sale_type,
-        "status": status,
-        "technician_id": technician_id,
-        "external_ref": ext or None,
-        "requirements_notes": req_notes or None,
-    }
-    if technician_id:
-        payload["assigned_at"] = now
-    if sale_type == "alquiler" and rw and rw > 0:
-        payload["rental_weekly_amount"] = float(rw)
-    sb.table("accounts").insert(payload).execute()
-    st.cache_data.clear()
-    st.success("Cuenta creada.")
-    st.rerun()
+            now = datetime.now(timezone.utc).isoformat()
+            payload = {
+                "client_id": client_id,
+                "platform_id": platform_id,
+                "sale_type": sale_type,
+                "status": status,
+                "technician_id": technician_id,
+                "external_ref": ext or None,
+                "requirements_notes": req_notes or None,
+            }
+            if technician_id:
+                payload["assigned_at"] = now
+            if sale_type == "alquiler" and rw and rw > 0:
+                payload["rental_weekly_amount"] = float(rw)
+            try:
+                sb.table("accounts").insert(payload).execute()
+                st.cache_data.clear()
+                st.success("Cuenta creada.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo crear: {e}")
+else:
+    st.caption("Los técnicos no crean cuentas nuevas desde la app; solo actualizan las asignadas.")
 
 st.subheader("Actualizar cuenta existente")
 if not accounts:
-    st.info("Crea al menos una cuenta arriba.")
+    st.info("Crea al menos una cuenta arriba (si tenés permiso).")
 else:
+
     def _acc_label(aid: str) -> str:
         cur = next(a for a in accounts if a["id"] == aid)
         p = pid.get(cur["platform_id"], "?")
@@ -175,16 +198,19 @@ else:
             upd["delivered_at"] = delivered.isoformat()
         if set_rental_due and rental_due:
             upd["rental_next_due_date"] = rental_due.isoformat()
-        sb.table("accounts").update(upd).eq("id", acc).execute()
-        if old_st != new_status:
-            sb.table("account_status_events").insert(
-                {
-                    "account_id": acc,
-                    "old_status": old_st,
-                    "new_status": new_status,
-                    "note": note_event or None,
-                }
-            ).execute()
-        st.cache_data.clear()
-        st.success("Cuenta actualizada.")
-        st.rerun()
+        try:
+            sb.table("accounts").update(upd).eq("id", acc).execute()
+            if old_st != new_status:
+                sb.table("account_status_events").insert(
+                    {
+                        "account_id": acc,
+                        "old_status": old_st,
+                        "new_status": new_status,
+                        "note": note_event or None,
+                    }
+                ).execute()
+            st.cache_data.clear()
+            st.success("Cuenta actualizada.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"No se pudo guardar: {e}")

@@ -1,14 +1,15 @@
 """
 Cliente ligero para PostgREST de Supabase (sin SDK supabase-py).
-Evita dependencias pesadas (p. ej. pyiceberg) en Windows/Python recientes.
+Con `access_token` del usuario, RLS aplica según auth.uid().
 """
 
-from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+from src.config import get_supabase_config
 
 
 def _fmt_filter_value(value: Any) -> str:
@@ -18,23 +19,22 @@ def _fmt_filter_value(value: Any) -> str:
         return "true" if value else "false"
     return str(value)
 
-from src.config import get_supabase_config
 
-
-def _headers(key: str) -> dict[str, str]:
+def _headers(anon_key: str, bearer: str) -> dict[str, str]:
     return {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
+        "apikey": anon_key,
+        "Authorization": f"Bearer {bearer}",
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
 
 
 class _Query:
-    def __init__(self, base: str, table: str, key: str, op: str):
+    def __init__(self, base: str, table: str, anon_key: str, bearer: str, op: str):
         self._base = base
         self._table = table
-        self._key = key
+        self._anon = anon_key
+        self._bearer = bearer
         self._op = op
         self._select = "*"
         self._filters: list[tuple[str, str, str]] = []
@@ -55,6 +55,10 @@ class _Query:
         self._body = data
         return self
 
+    def delete(self) -> "_Query":
+        self._op = "delete"
+        return self
+
     def eq(self, column: str, value: Any) -> "_Query":
         self._filters.append((column, "eq", _fmt_filter_value(value)))
         return self
@@ -68,51 +72,62 @@ class _Query:
         params: list[tuple[str, str]] = []
         for col, op, val in self._filters:
             params.append((col, f"{op}.{val}"))
+        hdrs = _headers(self._anon, self._bearer)
         if self._op == "select":
             params.append(("select", self._select))
             if self._order:
                 col, desc = self._order
                 params.append(("order", f"{col}.{'desc' if desc else 'asc'}"))
             with httpx.Client(timeout=30.0) as client:
-                r = client.get(url, headers=_headers(self._key), params=params)
+                r = client.get(url, headers=hdrs, params=params)
             r.raise_for_status()
             data = r.json()
             return SimpleNamespace(data=data if isinstance(data, list) else [data])
         if self._op == "insert":
             with httpx.Client(timeout=30.0) as client:
-                r = client.post(url, headers=_headers(self._key), json=self._body)
+                r = client.post(url, headers=hdrs, json=self._body)
             r.raise_for_status()
             data = r.json()
             return SimpleNamespace(data=data if isinstance(data, list) else [data])
         if self._op == "update":
             with httpx.Client(timeout=30.0) as client:
-                r = client.patch(url, headers=_headers(self._key), params=params, json=self._body)
+                r = client.patch(url, headers=hdrs, params=params, json=self._body)
             r.raise_for_status()
             txt = r.text
             if not txt or txt == "null":
                 return SimpleNamespace(data=[])
             data = r.json()
             return SimpleNamespace(data=data if isinstance(data, list) else [data])
+        if self._op == "delete":
+            with httpx.Client(timeout=30.0) as client:
+                r = client.delete(url, headers=hdrs, params=params)
+            r.raise_for_status()
+            return SimpleNamespace(data=[])
         raise RuntimeError(f"Operación no soportada: {self._op}")
 
 
 class _Client:
-    def __init__(self, base: str, key: str):
+    def __init__(self, base: str, anon_key: str, bearer: str):
         self._base = base.rstrip("/")
-        self._key = key
+        self._anon = anon_key
+        self._bearer = bearer
 
     def table(self, name: str) -> _Query:
-        return _Query(self._base, name, self._key, "select")
+        return _Query(self._base, name, self._anon, self._bearer, "select")
 
 
-@lru_cache(maxsize=1)
-def get_client() -> _Client:
-    url, key = get_supabase_config()
-    if not url or not key:
+def get_client(access_token: str | None = None) -> _Client:
+    """
+    Si `access_token` es el JWT del usuario, las políticas RLS usan auth.uid().
+    Si es None, se usa la anon key como Bearer (solo sirve si las políticas lo permiten; en producción no debería).
+    """
+    url, anon = get_supabase_config()
+    if not url or not anon:
         raise RuntimeError("Falta SUPABASE_URL o SUPABASE_KEY en el entorno.")
     base = url.rstrip("/") + "/rest/v1"
-    return _Client(base, key)
+    bearer = access_token if access_token else anon
+    return _Client(base, anon, bearer)
 
 
 def clear_client_cache():
-    get_client.cache_clear()
+    pass

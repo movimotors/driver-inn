@@ -12,34 +12,41 @@ import streamlit as st
 from src.config import supabase_configured
 from src.constants import ACCOUNT_STATUS_LABELS, SALE_TYPE_LABELS
 from src.db import get_client
+from src.rbac import require_login
 
 st.set_page_config(page_title="Dashboard", layout="wide")
 st.title("Resumen gerencial")
 
 if not supabase_configured():
-    st.error("Configura Supabase en `.env` para ver datos.")
+    st.error("Configura Supabase en `.env` o Secrets.")
     st.stop()
 
-try:
-    sb = get_client()
-except RuntimeError as e:
-    st.error(str(e))
-    st.stop()
+require_login()
+token = st.session_state.access_token
+
 
 @st.cache_data(ttl=60)
-def load_accounts():
+def load_accounts(_token: str):
+    sb = get_client(_token)
     r = sb.table("accounts").select(
         "id, status, sale_type, delivered_at, rental_next_due_date, rental_weekly_amount, platform_id, client_id, technician_id"
     ).execute()
     return r.data or []
 
+
 @st.cache_data(ttl=120)
-def load_platforms():
+def load_platforms(_token: str):
+    sb = get_client(_token)
     r = sb.table("delivery_platforms").select("id, name, code").execute()
     return {row["id"]: row for row in (r.data or [])}
 
-accounts = load_accounts()
-platforms = load_platforms()
+
+try:
+    accounts = load_accounts(token)
+    platforms = load_platforms(token)
+except Exception as e:
+    st.error(f"No se pudieron cargar los datos: {e}")
+    st.stop()
 
 if not accounts:
     st.info("Aún no hay cuentas. Crea clientes, técnicos y cuentas en las otras páginas.")
@@ -53,6 +60,7 @@ df["platform_name"] = df["platform_id"].map(lambda pid: platforms.get(pid, {}).g
 today = date.today()
 soon = today + timedelta(days=7)
 
+
 def rental_alert(row):
     if row.get("sale_type") != "alquiler" or not row.get("rental_next_due_date"):
         return None
@@ -64,6 +72,7 @@ def rental_alert(row):
     if d <= soon:
         return "próximo"
     return "ok"
+
 
 df["rental_alert"] = df.apply(rental_alert, axis=1)
 

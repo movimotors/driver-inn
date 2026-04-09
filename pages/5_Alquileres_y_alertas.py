@@ -11,6 +11,7 @@ import streamlit as st
 
 from src.config import supabase_configured
 from src.db import get_client
+from src.rbac import ROLE_ADMIN, ROLE_SUPER, ROLE_VENDEDOR, require_roles
 
 st.set_page_config(page_title="Alquileres", layout="wide")
 st.title("Alquileres, pagos y alertas")
@@ -19,13 +20,17 @@ if not supabase_configured():
     st.error("Configura `.env` con Supabase.")
     st.stop()
 
-sb = get_client()
+require_roles([ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR])
+
+token = st.session_state.access_token
+sb = get_client(token)
 
 
 @st.cache_data(ttl=30)
-def rental_accounts():
+def rental_accounts(_token: str):
+    c = get_client(_token)
     r = (
-        sb.table("accounts")
+        c.table("accounts")
         .select("id, client_id, platform_id, rental_weekly_amount, rental_next_due_date, delivered_at, status")
         .eq("sale_type", "alquiler")
         .execute()
@@ -34,9 +39,10 @@ def rental_accounts():
 
 
 @st.cache_data(ttl=30)
-def payments_for(account_id: str):
+def payments_for(_token: str, account_id: str):
+    c = get_client(_token)
     r = (
-        sb.table("rental_payments")
+        c.table("rental_payments")
         .select("*")
         .eq("account_id", account_id)
         .order("due_date", desc=True)
@@ -46,9 +52,10 @@ def payments_for(account_id: str):
 
 
 @st.cache_data(ttl=60)
-def lookups():
-    clients = {c["id"]: c["name"] for c in ((sb.table("clients").select("id,name").execute().data) or [])}
-    plats = {p["id"]: p["name"] for p in ((sb.table("delivery_platforms").select("id,name").execute().data) or [])}
+def lookups(_token: str):
+    c = get_client(_token)
+    clients = {x["id"]: x["name"] for x in ((c.table("clients").select("id,name").execute().data) or [])}
+    plats = {x["id"]: x["name"] for x in ((c.table("delivery_platforms").select("id,name").execute().data) or [])}
     return clients, plats
 
 
@@ -56,8 +63,13 @@ if st.button("Refrescar"):
     st.cache_data.clear()
     st.rerun()
 
-accounts = rental_accounts()
-clients, plats = lookups()
+try:
+    accounts = rental_accounts(token)
+    clients, plats = lookups(token)
+except Exception as e:
+    st.error(f"Error al cargar: {e}")
+    st.stop()
+
 today = date.today()
 
 st.subheader("Cuentas en alquiler — vencimientos")
@@ -108,7 +120,11 @@ def _pay_label(aid: str) -> str:
 sel = st.selectbox("Cuenta (alquiler)", options=acc_ids, format_func=_pay_label)
 
 with st.form("pay"):
-    amount = st.number_input("Monto", min_value=0.01, value=float(next(a for a in accounts if a["id"] == sel).get("rental_weekly_amount") or 0) or 1.0)
+    amount = st.number_input(
+        "Monto",
+        min_value=0.01,
+        value=float(next(a for a in accounts if a["id"] == sel).get("rental_weekly_amount") or 0) or 1.0,
+    )
     due = st.date_input("Período / vencimiento", value=today)
     period_label = st.text_input("Etiqueta (ej. semana 2026-W14)")
     notes = st.text_area("Notas")
@@ -128,15 +144,18 @@ if sub:
         from datetime import datetime, timezone
 
         pay_row["paid_at"] = datetime.now(timezone.utc).isoformat()
-    sb.table("rental_payments").insert(pay_row).execute()
-    if advance_next and mark_paid:
-        base = due
-        nxt = base + timedelta(days=7)
-        sb.table("accounts").update({"rental_next_due_date": nxt.isoformat()}).eq("id", sel).execute()
-    st.cache_data.clear()
-    st.success("Pago registrado.")
-    st.rerun()
+    try:
+        sb.table("rental_payments").insert(pay_row).execute()
+        if advance_next and mark_paid:
+            base = due
+            nxt = base + timedelta(days=7)
+            sb.table("accounts").update({"rental_next_due_date": nxt.isoformat()}).eq("id", sel).execute()
+        st.cache_data.clear()
+        st.success("Pago registrado.")
+        st.rerun()
+    except Exception as e:
+        st.error(f"No se pudo registrar el pago: {e}")
 
 st.subheader("Historial de pagos (cuenta seleccionada)")
-hist = payments_for(sel)
+hist = payments_for(token, sel)
 st.dataframe(hist, use_container_width=True, hide_index=True)

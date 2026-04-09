@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.config import supabase_configured
 from src.db import get_client
+from src.rbac import ROLE_ADMIN, ROLE_SUPER, require_roles
 
 st.set_page_config(page_title="Técnicos", layout="wide")
 st.title("Técnicos")
@@ -17,18 +18,24 @@ if not supabase_configured():
     st.error("Configura `.env` con Supabase.")
     st.stop()
 
-sb = get_client()
+require_roles([ROLE_SUPER, ROLE_ADMIN])
+
+token = st.session_state.access_token
+sb = get_client(token)
+
 
 @st.cache_data(ttl=30)
-def list_technicians():
-    r = sb.table("technicians").select("*").order("created_at", desc=True).execute()
+def list_technicians(_token: str):
+    c = get_client(_token)
+    r = c.table("technicians").select("*").order("created_at", desc=True).execute()
     return r.data or []
+
 
 if st.button("Refrescar lista"):
     st.cache_data.clear()
     st.rerun()
 
-rows = list_technicians()
+rows = list_technicians(token)
 st.dataframe(rows, use_container_width=True, hide_index=True)
 
 with st.expander("Nuevo técnico"):
