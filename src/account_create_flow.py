@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import streamlit as st
+from io import BytesIO
 
 from src.account_client_license import (
     back_storage_path as client_back_path,
@@ -27,6 +28,7 @@ from src.account_solo_licencia import (
     upsert_solo_record,
 )
 from src.storage_api import storage_upload
+from src.storage_api import storage_download
 from src.tpi_account_linking import (
     TERCERO_MODALITY,
     apply_account_tercero_identity,
@@ -176,6 +178,46 @@ def render_account_create_form(
                     cur = tpi_by_id.get(str(tpi_pick), {})
                     if not cur.get("portrait_photo_path"):
                         st.error("A este dato le falta **foto tipo carnet (frente)**. Cargala en **Datos terceros** para poder asignarlo.")
+                    else:
+                        # Preview: mostrar a quién se asigna (rostro + licencia)
+                        with st.container(border=True):
+                            card_header("Vista previa del dato (inventario)", "#283593", "Confirmá que es la persona correcta antes de asignar.")
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                try:
+                                    st.image(
+                                        BytesIO(storage_download(token, cur["portrait_photo_path"])),
+                                        caption="Rostro (carnet)",
+                                        use_container_width=True,
+                                    )
+                                except Exception:
+                                    st.caption("Sin imagen de rostro.")
+                            with c2:
+                                p = cur.get("photo_front_path")
+                                if p:
+                                    try:
+                                        st.image(
+                                            BytesIO(storage_download(token, p)),
+                                            caption="Licencia (frente)",
+                                            use_container_width=True,
+                                        )
+                                    except Exception:
+                                        st.caption("No se pudo mostrar frente.")
+                                else:
+                                    st.caption("Sin frente de licencia.")
+                            with c3:
+                                p = cur.get("photo_back_path")
+                                if p:
+                                    try:
+                                        st.image(
+                                            BytesIO(storage_download(token, p)),
+                                            caption="Licencia (dorso)",
+                                            use_container_width=True,
+                                        )
+                                    except Exception:
+                                        st.caption("No se pudo mostrar dorso.")
+                                else:
+                                    st.caption("Sin dorso de licencia.")
 
             # 2b) Solo licencia: solo si corresponde
             sl_front = sl_back = None
