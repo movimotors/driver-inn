@@ -27,6 +27,7 @@ from src.tpi_account_linking import (
     validate_tercero_link,
 )
 from src.ui_cards import card_header
+from src.requirements_checklist import checklist_template, merge_checklist
 
 
 @dataclass
@@ -78,6 +79,7 @@ def render_account_create_form(
     cid = {c["id"]: c.get("name") or "—" for c in clients}
     pid = {p["id"]: (p.get("name") or p.get("code") or "—") for p in plats}
     tid = {t["id"]: t.get("name") or "—" for t in techs}
+    plat_code = {p["id"]: (p.get("code") or "") for p in plats}
 
     if schema_has_solo_licencia is None:
         schema_has_solo_licencia = solo_table_available(sb)
@@ -208,6 +210,14 @@ def render_account_create_form(
             quality_ok = st.checkbox("Cuenta OK (lista para entregar)", value=False, key=f"{key_prefix}_qok")
 
         with st.container(border=True):
+            card_header("Checklist de requisitos", "#2E7D32", "Marcá lo que ya está listo para esta cuenta.")
+            tmpl = checklist_template(plat_code.get(platform_id), mod_key)
+            current_ck = merge_checklist({}, tmpl)
+            ck_out: dict[str, bool] = {}
+            for k, lbl in tmpl:
+                ck_out[k] = st.checkbox(lbl, value=bool(current_ck.get(k)), key=f"{key_prefix}_ck_{k}")
+
+        with st.container(border=True):
             card_header("4 · Notas", "#546E7A")
             ext = st.text_input("Referencia externa", key=f"{key_prefix}_ext")
             req_notes = st.text_area("Notas de requisitos", key=f"{key_prefix}_req")
@@ -250,6 +260,7 @@ def render_account_create_form(
         "social_obtained": bool(social_obtained),
         "ssn_full": (ssn_full or "").strip() or None,
         "quality_ok": bool(quality_ok),
+        "requirements_checklist": ck_out,
     }
     if schema_has_service_modality:
         payload["service_modality"] = mod_key

@@ -33,6 +33,35 @@ ACCOUNT_STATUS_COLOR = {
 
 SALE_TYPE_LABELS = {"venta": "Venta", "alquiler": "Alquiler"}
 
+# --- Checklist de requisitos (por plataforma / modalidad) ---
+# Se guarda en accounts.requirements_checklist (jsonb). Por ahora es base; luego afinamos por caso.
+REQUIREMENTS_BASE = [
+    ("perfil_creado", "Perfil creado"),
+    ("email_listo", "Email listo"),
+    ("telefono_listo", "Teléfono listo"),
+    ("documentos_ok", "Documentos OK"),
+    ("verificacion_ok", "Verificación OK"),
+    ("metodo_pago_ok", "Método de pago OK"),
+    ("app_lista", "App lista / instalada"),
+]
+
+REQUIREMENTS_BY_PLATFORM_CODE: dict[str, list[tuple[str, str]]] = {
+    "amazon_flex": [
+        ("banco_cargado", "Banco cargado (account + routing + tipo)"),
+        ("vehiculo_seguro", "Seguro del vehículo cargado (si aplica)"),
+        ("vehiculo_registro", "Registración del vehículo cargada (si aplica)"),
+    ],
+}
+
+REQUIREMENTS_BY_MODALITY: dict[str, list[tuple[str, str]]] = {
+    "cuenta_nombre_tercero": [("dato_tercero_asignado", "Dato de tercero asignado (inventario)")],
+    "cliente_licencia_sin_social": [("licencia_cliente_cargada", "Licencia del cliente cargada (fotos)")],
+    "cliente_licencia_social_activacion_cupo": [
+        ("ssn_registrado", "Social/SSN completo registrado"),
+        ("activacion_cupo", "Activación por cupo completada"),
+    ],
+}
+
 # Modalidad de servicio (negocio): qué tipo de creación/gestión es la cuenta
 SERVICE_MODALITY_ORDER = [
     "cuenta_nombre_tercero",

@@ -44,6 +44,7 @@ from src.tpi_account_linking import (
 )
 from src.account_create_flow import render_account_create_form
 from src.ui_cards import card_header
+from src.requirements_checklist import checklist_template, merge_checklist
 
 st.title("Cuentas delivery — semáforo de estado")
 
@@ -132,6 +133,7 @@ cid = {c["id"]: c["name"] for c in clients}
 client_default_mod = {str(c["id"]): c.get("default_service_modality") for c in clients if c.get("id")}
 tid = {t["id"]: t["name"] for t in techs}
 pid = {p["id"]: p["name"] for p in plats}
+plat_code = {p["id"]: (p.get("code") or "") for p in plats}
 
 st.subheader("Leyenda del semáforo")
 cols = st.columns(len(ACCOUNT_STATUS_ORDER[:5]))
@@ -312,6 +314,19 @@ else:
         rental_due = st.date_input("Próximo vencimiento alquiler", value=None) if set_rental_due else None
         note_event = st.text_input("Nota del cambio (auditoría)")
         with st.container(border=True):
+            card_header("Checklist de requisitos", "#2E7D32", "Se guarda en la cuenta y se adapta por plataforma/modalidad.")
+            cur_platform_code = plat_code.get(current.get("platform_id"), "")
+            cur_modality = (
+                SERVICE_MODALITY_ORDER[new_modality_ix]
+                if schema_has_service_modality
+                else (current.get("service_modality") or "cuenta_nombre_tercero")
+            )
+            tmpl = checklist_template(cur_platform_code, cur_modality)
+            merged = merge_checklist(current.get("requirements_checklist") or {}, tmpl)
+            ck_new: dict[str, bool] = {}
+            for k, lbl in tmpl:
+                ck_new[k] = st.checkbox(lbl, value=bool(merged.get(k)), key=f"ua_ck_{acc}_{k}")
+        with st.container(border=True):
             card_header("Social (SSN) y calidad", "#00897B")
             ua_social = st.checkbox(
                 "¿Se consiguió Social (SSN) para esta cuenta?",
@@ -400,6 +415,7 @@ else:
             upd["social_obtained"] = bool(st.session_state.get(f"ua_social_{acc}"))
             upd["ssn_full"] = (st.session_state.get(f"ua_ssn_full_{acc}") or "").strip() or None
             upd["quality_ok"] = bool(st.session_state.get(f"ua_qok_{acc}"))
+            upd["requirements_checklist"] = ck_new
             from datetime import timezone
 
             if new_tech and not current.get("technician_id"):
