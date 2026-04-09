@@ -137,6 +137,10 @@ _ACCOUNTS_LIST_COLS_V2 = (
     "id, client_id, platform_id, technician_id, sale_type, sale_price, payment_terms, status, service_modality, requirements_notes, "
     "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
 )
+_ACCOUNTS_LIST_COLS_V2A = (
+    "id, client_id, platform_id, technician_id, sale_type, status, service_modality, requirements_notes, "
+    "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
+)
 _ACCOUNTS_LIST_COLS_V1 = (
     "id, client_id, platform_id, technician_id, sale_type, status, requirements_notes, "
     "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
@@ -144,6 +148,10 @@ _ACCOUNTS_LIST_COLS_V1 = (
 
 _ACCOUNTS_DASH_COLS_V2 = (
     "id, status, sale_type, sale_price, payment_terms, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, "
+    "platform_id, client_id, technician_id"
+)
+_ACCOUNTS_DASH_COLS_V2A = (
+    "id, status, sale_type, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, "
     "platform_id, client_id, technician_id"
 )
 _ACCOUNTS_DASH_COLS_V1 = (
@@ -164,16 +172,34 @@ def fetch_accounts_list_with_modality_fallback(client: _Client) -> tuple[list[di
         return (r.data or [], True)
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 400:
-            r = (
-                client.table("accounts")
-                .select(_ACCOUNTS_LIST_COLS_V1)
-                .order("created_at", desc=True)
-                .execute()
-            )
-            rows = r.data or []
-            for row in rows:
-                row.setdefault("service_modality", "cuenta_nombre_tercero")
-            return (rows, False)
+            # Puede fallar por columnas nuevas (sale_price/payment_terms). Reintenta con service_modality sin esas columnas.
+            try:
+                r2 = (
+                    client.table("accounts")
+                    .select(_ACCOUNTS_LIST_COLS_V2A)
+                    .order("created_at", desc=True)
+                    .execute()
+                )
+                rows2 = r2.data or []
+                for row in rows2:
+                    row.setdefault("sale_price", None)
+                    row.setdefault("payment_terms", None)
+                return (rows2, True)
+            except httpx.HTTPStatusError as e2:
+                if e2.response.status_code != 400:
+                    raise
+                r = (
+                    client.table("accounts")
+                    .select(_ACCOUNTS_LIST_COLS_V1)
+                    .order("created_at", desc=True)
+                    .execute()
+                )
+                rows = r.data or []
+                for row in rows:
+                    row.setdefault("service_modality", "cuenta_nombre_tercero")
+                    row.setdefault("sale_price", None)
+                    row.setdefault("payment_terms", None)
+                return (rows, False)
         raise
 
 
@@ -183,9 +209,22 @@ def fetch_accounts_dashboard_with_modality_fallback(client: _Client) -> tuple[li
         return (r.data or [], True)
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 400:
-            r = client.table("accounts").select(_ACCOUNTS_DASH_COLS_V1).execute()
-            rows = r.data or []
-            for row in rows:
-                row.setdefault("service_modality", "cuenta_nombre_tercero")
-            return (rows, False)
+            # Puede faltar sale_price/payment_terms, pero existir service_modality.
+            try:
+                r2 = client.table("accounts").select(_ACCOUNTS_DASH_COLS_V2A).execute()
+                rows2 = r2.data or []
+                for row in rows2:
+                    row.setdefault("sale_price", None)
+                    row.setdefault("payment_terms", None)
+                return (rows2, True)
+            except httpx.HTTPStatusError as e2:
+                if e2.response.status_code != 400:
+                    raise
+                r = client.table("accounts").select(_ACCOUNTS_DASH_COLS_V1).execute()
+                rows = r.data or []
+                for row in rows:
+                    row.setdefault("service_modality", "cuenta_nombre_tercero")
+                    row.setdefault("sale_price", None)
+                    row.setdefault("payment_terms", None)
+                return (rows, False)
         raise
