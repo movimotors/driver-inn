@@ -15,7 +15,7 @@ Usá este archivo cuando cortes la sesión (descanso, corte de luz, reinicio). *
 
 - **Repo:** `movimotors/driver-inn` · entrada Streamlit: **`Home.py`**
 - **Supabase:** si falta algo de auth/finanzas, revisá `README.md` y migraciones en `supabase/`
-- **Migración rol registro:** ejecutar en SQL Editor si aún no: `migration_004_signup_role.sql`
+- **Migraciones:** si falta algo: `migration_004_signup_role.sql`, `migration_005_datos_terceros.sql` (datos terceros + bucket **license-photos**)
 
 ## Al retomar (orden sugerido)
 

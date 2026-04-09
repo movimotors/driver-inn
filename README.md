@@ -33,11 +33,12 @@ update public.profiles set role = 'superusuario' where id = '<uuid del usuario>'
 2. **SQL Editor**: ejecutá [`supabase/migration_002_auth_profiles_rls.sql`](supabase/migration_002_auth_profiles_rls.sql) (sustituye las políticas abiertas de desarrollo por RLS con JWT).
 3. **SQL Editor** (opcional): [`supabase/migration_003_finance_telecom.sql`](supabase/migration_003_finance_telecom.sql) — cuentas por pagar/cobrar, gastos operativos, inventario telecom (datos, números, proxies, líneas) + RLS + filas de ejemplo. Si la ejecutás de nuevo, los `INSERT` duplicarán datos: comentá o borrá la sección de ejemplo.
 4. **SQL Editor**: [`supabase/migration_004_signup_role.sql`](supabase/migration_004_signup_role.sql) — al registrarse, el rol **vendedor** o **técnico** elegido en la app se guarda en `profiles` (metadata `signup_role`). Sin esta migración, todos los registros quedan como técnico.
-5. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
-6. **Authentication → URL configuration**:
+5. **SQL Editor**: [`supabase/migration_005_datos_terceros.sql`](supabase/migration_005_datos_terceros.sql) — **Datos terceros** (licencias): tablas `third_party_identities` y `account_identity_links`, bucket Storage **license-photos** y políticas. La pantalla **Inventario telecom** fue reemplazada por **Datos terceros** en la app.
+6. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
+7. **Authentication → URL configuration**:
    - **Site URL**: en producción, ponelá la URL pública de Streamlit (`https://TU-APP.streamlit.app`), no `localhost`, si los usuarios confirman correo desde el celular u otro equipo.
    - **Redirect URLs**: añadí esa misma URL (y `http://localhost:8501` si probás en local). Aplica a **recuperación de contraseña** y a **confirmar registro por correo**.
-7. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
+8. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
 
 ## Configuración local
 
@@ -90,12 +91,13 @@ git push -u origin main
 |------|-------------|
 | `Home.py` | Entrada: login exclusivo si no hay sesión; luego `st.navigation` |
 | `views/login_screen.py` | Formularios de acceso (sesión, registro, recuperar contraseña) |
-| `views/*.py` | Dashboard, clientes, finanzas, inventario, admin (solo con sesión) |
+| `views/*.py` | Dashboard, clientes, finanzas, datos terceros (licencias), admin (solo con sesión) |
 | `src/` | Config, cliente REST, auth HTTP, roles |
 | `supabase/schema.sql` | Tablas iniciales |
 | `supabase/migration_002_auth_profiles_rls.sql` | Perfiles, Auth trigger, RLS por rol |
 | `supabase/migration_003_finance_telecom.sql` | Finanzas + telecom, RLS, inserts de ejemplo |
 | `supabase/migration_004_signup_role.sql` | Rol al registrarse (vendedor/técnico) vía metadata |
+| `supabase/migration_005_datos_terceros.sql` | Licencias / datos terceros + fotos (Storage) + vínculo a cuentas |
 
 ## Próximos pasos sugeridos
 

@@ -26,7 +26,7 @@ ALL_ROLES = [ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR, ROLE_TECNICO]
 # Registro público: solo estos (super/admin los asigna un administrador).
 SELF_SIGNUP_ROLE_OPTIONS: dict[str, str] = {
     ROLE_VENDEDOR: "Vendedor — clientes, cuentas, alquileres y finanzas",
-    ROLE_TECNICO: "Técnico — cuentas asignadas e inventario telecom vinculado a tu usuario",
+    ROLE_TECNICO: "Técnico — cuentas asignadas y datos terceros vinculados a esas cuentas",
 }
 
 # Finanzas (por pagar / cobrar / gastos): sin técnico
@@ -54,7 +54,7 @@ def _nav_full() -> dict[str, list[NavPage]]:
             NavPage("views/7_Por_pagar.py", "Por pagar", "📤"),
             NavPage("views/8_Por_cobrar.py", "Por cobrar", "📥"),
             NavPage("views/9_Gastos_operativos.py", "Gastos", "🧾"),
-            NavPage("views/10_Inventario_telecom.py", "Inventario telecom", "📡"),
+            NavPage("views/10_Datos_terceros.py", "Datos terceros", "🪪"),
         ],
         "Administración": [
             NavPage("views/6_Admin_usuarios.py", "Usuarios y roles", "⚙️"),
@@ -74,7 +74,7 @@ def _nav_vendedor() -> dict[str, list[NavPage]]:
             NavPage("views/7_Por_pagar.py", "Por pagar", "📤"),
             NavPage("views/8_Por_cobrar.py", "Por cobrar", "📥"),
             NavPage("views/9_Gastos_operativos.py", "Gastos", "🧾"),
-            NavPage("views/10_Inventario_telecom.py", "Inventario telecom", "📡"),
+            NavPage("views/10_Datos_terceros.py", "Datos terceros", "🪪"),
         ],
     }
 
@@ -86,7 +86,7 @@ def _nav_tecnico() -> dict[str, list[NavPage]]:
             NavPage("views/4_Cuentas.py", "Cuentas", "📦"),
         ],
         "Recursos": [
-            NavPage("views/10_Inventario_telecom.py", "Inventario telecom", "📡"),
+            NavPage("views/10_Datos_terceros.py", "Datos terceros", "🪪"),
         ],
     }
 
@@ -161,9 +161,19 @@ def can_delete_finance_records() -> bool:
     return has_role(ROLE_SUPER, ROLE_ADMIN)
 
 
-def can_edit_telecom_inventory() -> bool:
-    """Alta/edición/baja de inventario telecom (RLS: solo super + administración)."""
+def can_edit_datos_terceros() -> bool:
+    """Alta/edición de licencias / datos terceros (RLS: super, administración, vendedor)."""
+    return has_role(ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR)
+
+
+def can_delete_datos_terceros() -> bool:
+    """Baja de registros de datos terceros (RLS: super y administración)."""
     return has_role(ROLE_SUPER, ROLE_ADMIN)
+
+
+def can_edit_telecom_inventory() -> bool:
+    """Compatibilidad: antes inventario telecom; ahora mismo criterio que datos terceros."""
+    return can_edit_datos_terceros()
 
 
 def current_role_label() -> str:
