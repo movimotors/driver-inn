@@ -20,9 +20,18 @@ alter table public.accounts
 alter table public.accounts
   add column if not exists ssn_last4 text;
 
-alter table public.accounts
-  add constraint if not exists chk_accounts_ssn_last4
-  check (ssn_last4 is null or ssn_last4 ~ '^[0-9]{4}$');
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chk_accounts_ssn_last4'
+  ) then
+    alter table public.accounts
+      add constraint chk_accounts_ssn_last4
+      check (ssn_last4 is null or ssn_last4 ~ '^[0-9]{4}$');
+  end if;
+end $$;
 
 alter table public.accounts
   add column if not exists quality_ok boolean not null default false;
