@@ -150,7 +150,7 @@ def _show_license_photo(label: str, path: str | None):
 
 
 def _delete_photos_if_any(row: dict):
-    for key in ("photo_front_path", "photo_back_path"):
+    for key in ("photo_front_path", "photo_back_path", "portrait_photo_path"):
         p = row.get(key)
         if p:
             try:
@@ -342,6 +342,9 @@ else:
             _card_start("📷 Dorso de la licencia")
             _show_license_photo("", cur.get("photo_back_path"))
     with st.container(border=True):
+        _card_start("🪪 Foto tipo carnet (frente)", "Obligatoria para usar el dato en cuentas a nombre de tercero.")
+        _show_license_photo("", cur.get("portrait_photo_path"))
+    with st.container(border=True):
         _card_start("🔗 Cuentas delivery vinculadas", "Donde se usa esta identidad.")
         la = links_map.get(pick, [])
         if la:
@@ -440,12 +443,14 @@ if edit_ok:
                         plat_vals[field] = st.checkbox(lbl, key=f"n_{field}")
 
             with st.container(border=True):
-                _card_start("4 · Fotos de la licencia", "JPEG, PNG o WebP. Hasta ~5 MB por archivo.")
-                f1, f2 = st.columns(2)
+                _card_start("4 · Fotos", "JPEG, PNG o WebP. Hasta ~5 MB por archivo.")
+                f1, f2, f3 = st.columns(3)
                 with f1:
-                    up_f = st.file_uploader("Frente", type=["jpg", "jpeg", "png", "webp"], key="nf")
+                    up_f = st.file_uploader("Licencia · Frente", type=["jpg", "jpeg", "png", "webp"], key="nf")
                 with f2:
-                    up_b = st.file_uploader("Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
+                    up_b = st.file_uploader("Licencia · Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
+                with f3:
+                    up_portrait = st.file_uploader("Carnet · Frente *", type=["jpg", "jpeg", "png", "webp"], key="np")
 
             with st.container(border=True):
                 _card_start(
@@ -508,6 +513,13 @@ if edit_ok:
                         pb = f"{new_id}/back.{ext_b}"
                         storage_upload(token, pb, up_b.getvalue(), up_b.type or "image/jpeg")
                         sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", new_id).execute()
+                        if up_portrait:
+                            ext_p = (up_portrait.name.rsplit(".", 1)[-1] if "." in up_portrait.name else "jpg").lower()
+                            if ext_p == "jpeg":
+                                ext_p = "jpg"
+                            pp = f"{new_id}/portrait.{ext_p}"
+                            storage_upload(token, pp, up_portrait.getvalue(), up_portrait.type or "image/jpeg")
+                            sb.table("third_party_identities").update({"portrait_photo_path": pp}).eq("id", new_id).execute()
                     st.cache_data.clear()
                     st.success("Registro creado en inventario. Vinculá la cuenta desde **Cuentas** o **Clientes**.")
                     st.rerun()
@@ -636,11 +648,13 @@ if edit_ok and rows:
 
             with st.container(border=True):
                 _card_start("4 · Fotos (reemplazo opcional)", "Si subís un archivo nuevo, reemplaza la imagen anterior.")
-                uf1, uf2 = st.columns(2)
+                uf1, uf2, uf3 = st.columns(3)
                 with uf1:
                     u_f = st.file_uploader("Nuevo frente", type=["jpg", "jpeg", "png", "webp"], key="uf")
                 with uf2:
                     u_b = st.file_uploader("Nuevo dorso", type=["jpg", "jpeg", "png", "webp"], key="ub")
+                with uf3:
+                    u_p = st.file_uploader("Nuevo carnet (frente)", type=["jpg", "jpeg", "png", "webp"], key="up")
 
             with st.container(border=True):
                 _card_start(
@@ -703,6 +717,13 @@ if edit_ok and rows:
                         pb = f"{e_pick}/back.{ext}"
                         storage_upload(token, pb, u_b.getvalue(), u_b.type or "image/jpeg")
                         sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", e_pick).execute()
+                        if u_p:
+                            ext = (u_p.name.rsplit(".", 1)[-1] if "." in u_p.name else "jpg").lower()
+                            if ext == "jpeg":
+                                ext = "jpg"
+                            pp = f"{e_pick}/portrait.{ext}"
+                            storage_upload(token, pp, u_p.getvalue(), u_p.type or "image/jpeg")
+                            sb.table("third_party_identities").update({"portrait_photo_path": pp}).eq("id", e_pick).execute()
                     st.cache_data.clear()
                     st.success("Actualizado.")
                     st.rerun()

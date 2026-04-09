@@ -51,6 +51,12 @@ def _selectbox_modality(
         default_ix = order.index(client_default)
     except ValueError:
         default_ix = 0
+    # Si cambió el cliente, resetea la modalidad al default del cliente (evita que quede "pegada" a la selección anterior)
+    last_client = st.session_state.get(f"{key_prefix}_last_client_for_modality")
+    cur_client = st.session_state.get(f"{key_prefix}_client")
+    if cur_client and cur_client != last_client:
+        st.session_state[f"{key_prefix}_modality_ix"] = default_ix
+        st.session_state[f"{key_prefix}_last_client_for_modality"] = cur_client
     ix = st.selectbox(
         "Modalidad de servicio",
         options=list(range(len(order))),
@@ -166,6 +172,10 @@ def render_account_create_form(
                 )
                 if not ter_new_opts:
                     st.caption("No hay fichas disponibles: cargalas en **Datos terceros**.")
+                if tpi_pick:
+                    cur = tpi_by_id.get(str(tpi_pick), {})
+                    if not cur.get("portrait_photo_path"):
+                        st.error("A este dato le falta **foto tipo carnet (frente)**. Cargala en **Datos terceros** para poder asignarlo.")
 
             # 2b) Solo licencia: solo si corresponde
             sl_front = sl_back = None
@@ -313,6 +323,12 @@ def render_account_create_form(
     if schema_has_service_modality and mod_key == TERCERO_MODALITY and not tpi_pick:
         st.error("Modalidad a nombre de tercero: elegí una ficha **disponible** del inventario.")
         return AccountCreateResult(created=False)
+    if schema_has_service_modality and mod_key == TERCERO_MODALITY and tpi_pick:
+        tpi_by_id = {str(r["id"]): r for r in tpi_rows}
+        cur = tpi_by_id.get(str(tpi_pick), {})
+        if not cur.get("portrait_photo_path"):
+            st.error("Formulario A: el dato seleccionado no tiene **foto tipo carnet (frente)**.")
+            return AccountCreateResult(created=False)
     if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo" and not (ssn_full or "").strip():
         st.error("Modalidad activación por cupo: ingresá el **Social/SSN completo**.")
         return AccountCreateResult(created=False)
