@@ -23,15 +23,12 @@ from src.constants import (
 )
 from src.account_solo_licencia import (
     SOLO_LICENCIA_MODALITY,
-    back_storage_path,
     delete_record,
     fetch_solo_map,
     front_storage_path,
     normalize_image_ext,
     remove_storage_files,
     solo_table_available,
-    storage_paths_for_account,
-    upsert_solo_record,
 )
 from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_TECNICO, require_login
@@ -42,10 +39,10 @@ from src.tpi_account_linking import (
     current_tercero_identity_id,
     identity_option_label,
     identity_rows_for_account_editor,
-    identity_selectable_for_new_account,
     load_identities_and_links,
     validate_tercero_link,
 )
+from src.account_create_flow import render_account_create_form
 
 st.title("Cuentas delivery — semáforo de estado")
 
@@ -174,198 +171,28 @@ if can_create:
     if not clients or not plats:
         st.warning("Necesitás al menos un cliente y plataformas cargadas.")
     else:
-        with st.form("new_account"):
-            client_id = st.selectbox("Cliente", options=[c["id"] for c in clients], format_func=lambda x: cid[x], key="na_c")
-            platform_id = st.selectbox(
-                "Plataforma", options=[p["id"] for p in plats], format_func=lambda x: pid[x], key="na_p"
-            )
-            default_mod = client_default_mod.get(str(client_id)) or "cuenta_nombre_tercero"
-            try:
-                default_mod_ix = SERVICE_MODALITY_ORDER.index(default_mod)
-            except ValueError:
-                default_mod_ix = 0
-            modality_ix = st.selectbox(
-                "Modalidad de servicio",
-                options=list(range(len(SERVICE_MODALITY_ORDER))),
-                format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
-                help="Define si la cuenta es a nombre de tercero, cliente con licencia sin SSN, o con SSN y activación por cupo.",
-                disabled=not schema_has_service_modality,
-                index=default_mod_ix,
-            )
-            if schema_has_service_modality:
-                st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
-            else:
-                st.caption("Tras aplicar la migración 006 podrás guardar la modalidad.")
-            ter_new_opts = [
-                r
-                for r in tpi_rows
-                if identity_selectable_for_new_account(r, str(r["id"]), links_by_i)
-            ]
-            na_tpi_options: list = [None] + [str(r["id"]) for r in ter_new_opts]
-
-            def _fmt_na_tpi(x):
-                if x is None:
-                    return "— Sin elegir —"
-                return identity_option_label(tpi_by_id.get(str(x), {}))
-
-            st.selectbox(
-                "Dato de tercero (inventario)",
-                options=na_tpi_options,
-                format_func=_fmt_na_tpi,
-                help="Solo aparecen fichas **disponibles** (sin cuenta vinculada). Obligatorio si la modalidad es **Cuenta a nombre de tercero**.",
-                key="na_tpi",
-            )
-            if not ter_new_opts:
-                st.caption("No hay fichas disponibles en inventario: cargalas en **Datos terceros**.")
-            sale_type = st.selectbox("Tipo", options=[x[0] for x in SALE_OPTIONS], format_func=lambda x: dict(SALE_OPTIONS)[x])
-            status = st.selectbox(
-                "Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x]
-            )
-            with st.container(border=True):
-                st.markdown("##### Registro **solo licencia** (sin social / SSN)")
-                st.caption(
-                    "Si la modalidad es **Cliente con licencia — sin social**, se guarda un registro aparte con "
-                    "**foto(s)** y **precio de venta**. En otras modalidades esto no se usa."
-                )
-                na_sl_front = st.file_uploader(
-                    "Foto frente de la licencia",
-                    type=["jpg", "jpeg", "png", "webp"],
-                    key="na_slf",
-                )
-                na_sl_back = st.file_uploader(
-                    "Foto dorso (opcional)",
-                    type=["jpg", "jpeg", "png", "webp"],
-                    key="na_slb",
-                )
-                na_sl_price = st.number_input(
-                    "Precio de venta cobrado",
-                    min_value=0.0,
-                    value=0.0,
-                    step=10.0,
-                    key="na_slp",
-                    help="Con tipo **Venta** debe ser mayor a 0.",
-                )
-                na_sl_notes = st.text_area(
-                    "Notas del registro solo licencia",
-                    placeholder="Opcional",
-                    key="na_sln",
-                    height=72,
-                )
-            technician_id = st.selectbox(
-                "Técnico (opcional)",
-                options=[None] + [t["id"] for t in techs],
-                format_func=lambda x: "—" if x is None else tid[x],
-            )
-            ext = st.text_input("Referencia externa")
-            req_notes = st.text_area("Notas de requisitos")
-            rw = st.number_input("Monto alquiler semanal (solo si aplica)", min_value=0.0, value=0.0, step=1.0)
-            with st.container(border=True):
-                st.markdown("##### Social (SSN) y calidad")
-                na_social = st.checkbox("¿Ya se consiguió Social (SSN) para esta cuenta?", value=False, key="na_social")
-                na_ssn_last4 = st.text_input("SSN (últimos 4 dígitos)", max_chars=4, key="na_ssn4")
-                na_quality_ok = st.checkbox("Cuenta OK (lista para entregar)", value=False, key="na_quality_ok")
-            submitted = st.form_submit_button("Crear cuenta")
-        if submitted:
-            from datetime import timezone
-
-            now = datetime.now(timezone.utc).isoformat()
-            mod_key = SERVICE_MODALITY_ORDER[modality_ix] if schema_has_service_modality else None
-            na_tpi_pick = st.session_state.get("na_tpi")
-            solo_err = None
-            if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
-                if not na_sl_front:
-                    solo_err = "Modalidad **solo licencia**: subí la **foto del frente** de la licencia del cliente."
-                elif sale_type == "venta" and (not na_sl_price or na_sl_price <= 0):
-                    solo_err = "Modalidad **solo licencia** con tipo **Venta**: indicá el **precio cobrado** (mayor a 0)."
-            if schema_has_service_modality and mod_key == TERCERO_MODALITY and not na_tpi_pick:
-                st.error("Con modalidad **Cuenta a nombre de tercero** tenés que elegir una ficha del inventario (disponible).")
-            elif solo_err:
-                st.error(solo_err)
-            else:
-                act_err = None
-                if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo":
-                    if not (st.session_state.get("na_ssn4") or "").strip():
-                        act_err = "Modalidad **activación por cupo**: ingresá el SSN (últimos 4)."
-                if act_err:
-                    st.error(act_err)
-                    payload = None
-                else:
-                    payload = {
-                        "client_id": client_id,
-                        "platform_id": platform_id,
-                        "sale_type": sale_type,
-                        "status": status,
-                        "technician_id": technician_id,
-                        "external_ref": ext or None,
-                        "requirements_notes": req_notes or None,
-                        "social_obtained": bool(st.session_state.get("na_social")),
-                        "ssn_last4": (st.session_state.get("na_ssn4") or "").strip() or None,
-                        "quality_ok": bool(st.session_state.get("na_quality_ok")),
-                    }
-                if payload is not None:
-                    if schema_has_service_modality:
-                        payload["service_modality"] = mod_key
-                    if technician_id:
-                        payload["assigned_at"] = now
-                    if sale_type == "alquiler" and rw and rw > 0:
-                        payload["rental_weekly_amount"] = float(rw)
-                    try:
-                        ins = sb.table("accounts").insert(payload).execute()
-                        new_aid = str(ins.data[0]["id"])
-
-                        if schema_has_service_modality:
-                            link_id = na_tpi_pick if mod_key == TERCERO_MODALITY else None
-                            if mod_key == TERCERO_MODALITY and link_id:
-                                verr = validate_tercero_link(sb, new_aid, str(link_id))
-                                if verr:
-                                    sb.table("accounts").delete().eq("id", new_aid).execute()
-                                    st.error(verr)
-                                    raise RuntimeError("rollback")
-                                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
-                            else:
-                                apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
-
-                        if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
-                            ext_f = normalize_image_ext(na_sl_front.name)
-                            fp, _ = storage_paths_for_account(new_aid, ext_f, None)
-                            storage_upload(
-                                token,
-                                fp,
-                                na_sl_front.getvalue(),
-                                na_sl_front.type or "image/jpeg",
-                            )
-                            back_path = None
-                            if na_sl_back:
-                                ext_b = normalize_image_ext(na_sl_back.name)
-                                back_path = back_storage_path(new_aid, ext_b)
-                                storage_upload(
-                                    token,
-                                    back_path,
-                                    na_sl_back.getvalue(),
-                                    na_sl_back.type or "image/jpeg",
-                                )
-                            upsert_solo_record(
-                                sb,
-                                new_aid,
-                                float(na_sl_price),
-                                na_sl_notes or None,
-                                fp,
-                                back_path,
-                            )
-
-                        st.cache_data.clear()
-                        msg = "Cuenta creada."
-                        if mod_key == TERCERO_MODALITY and na_tpi_pick:
-                            msg = "Cuenta creada y dato de tercero vinculado."
-                        elif mod_key == SOLO_LICENCIA_MODALITY:
-                            msg = "Cuenta creada con registro **solo licencia** (foto y precio)."
-                        st.success(msg)
-                        st.rerun()
-                    except RuntimeError as re:
-                        if str(re) != "rollback":
-                            st.error(str(re))
-                    except Exception as e:
-                        st.error(f"No se pudo crear: {e}")
+        res = render_account_create_form(
+            sb=sb,
+            token=token,
+            key_prefix="cuentas",
+            schema_has_service_modality=schema_has_service_modality,
+            schema_has_solo_licencia=schema_has_solo_licencia,
+            service_modality_order=SERVICE_MODALITY_ORDER,
+            service_modality_labels=SERVICE_MODALITY_LABELS,
+            service_modality_help=SERVICE_MODALITY_HELP,
+            clients=clients,
+            client_id_default_modality=client_default_mod,
+            plats=plats,
+            techs=techs,
+            tpi_rows=tpi_rows,
+            links_by_i=links_by_i,
+            status_options=STATUS_OPTIONS,
+            sale_options=SALE_OPTIONS,
+        )
+        if res.created:
+            st.cache_data.clear()
+            st.success(res.message or "Cuenta creada.")
+            st.rerun()
 else:
     st.caption("Los técnicos no crean cuentas nuevas desde la app; solo actualizan las asignadas.")
 
