@@ -9,11 +9,26 @@ if str(_ROOT) not in sys.path:
 import streamlit as st
 
 from src.config import supabase_configured
-from src.constants import ACCOUNT_STATUS_COLOR, ACCOUNT_STATUS_LABELS, ACCOUNT_STATUS_ORDER, SALE_TYPE_LABELS
+from src.constants import (
+    ACCOUNT_STATUS_COLOR,
+    ACCOUNT_STATUS_LABELS,
+    ACCOUNT_STATUS_ORDER,
+    SALE_TYPE_LABELS,
+    SERVICE_MODALITY_HELP,
+    SERVICE_MODALITY_LABELS,
+    SERVICE_MODALITY_ORDER,
+)
 from src.db import get_client
 from src.rbac import ROLE_TECNICO, require_login
 
 st.title("Cuentas delivery — semáforo de estado")
+
+with st.expander("Modalidades de servicio (cómo se trabaja cada cuenta)", expanded=False):
+    st.markdown(
+        "Ofrecés **tres tipos** de creación/gestión; elegí la correcta al crear o editar la cuenta para que el equipo sepa qué falta."
+    )
+    for key in SERVICE_MODALITY_ORDER:
+        st.markdown(f"**{SERVICE_MODALITY_LABELS[key]}** — {SERVICE_MODALITY_HELP[key]}")
 
 if not supabase_configured():
     st.error("Configura `.env` con Supabase.")
@@ -43,7 +58,7 @@ def load_accounts_full(_token: str):
     r = (
         c.table("accounts")
         .select(
-            "id, client_id, platform_id, technician_id, sale_type, status, requirements_notes, "
+            "id, client_id, platform_id, technician_id, sale_type, status, service_modality, requirements_notes, "
             "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
         )
         .order("created_at", desc=True)
@@ -85,9 +100,11 @@ for row in accounts:
     cli = cid.get(row["client_id"], row["client_id"])
     tech = tid.get(row["technician_id"], "—") if row.get("technician_id") else "Sin asignar"
     badge = status_badge(row["status"])
+    mod = row.get("service_modality") or "cuenta_nombre_tercero"
+    mod_lbl = SERVICE_MODALITY_LABELS.get(mod, mod)
     st.markdown(
         f"**{plat}** · Cliente: {cli} · Técnico: {tech} · "
-        f"{SALE_TYPE_LABELS.get(row['sale_type'], row['sale_type'])} — {badge}",
+        f"{SALE_TYPE_LABELS.get(row['sale_type'], row['sale_type'])} · *{mod_lbl}* — {badge}",
         unsafe_allow_html=True,
     )
     if row.get("requirements_notes"):
@@ -104,6 +121,13 @@ if can_create:
             platform_id = st.selectbox(
                 "Plataforma", options=[p["id"] for p in plats], format_func=lambda x: pid[x], key="na_p"
             )
+            modality_ix = st.selectbox(
+                "Modalidad de servicio",
+                options=list(range(len(SERVICE_MODALITY_ORDER))),
+                format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
+                help="Define si la cuenta es a nombre de tercero, cliente con licencia sin SSN, o con SSN y activación por cupo.",
+            )
+            st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
             sale_type = st.selectbox("Tipo", options=[x[0] for x in SALE_OPTIONS], format_func=lambda x: dict(SALE_OPTIONS)[x])
             status = st.selectbox(
                 "Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x]
@@ -126,6 +150,7 @@ if can_create:
                 "platform_id": platform_id,
                 "sale_type": sale_type,
                 "status": status,
+                "service_modality": SERVICE_MODALITY_ORDER[modality_ix],
                 "technician_id": technician_id,
                 "external_ref": ext or None,
                 "requirements_notes": req_notes or None,
@@ -166,8 +191,21 @@ else:
         st_index = ACCOUNT_STATUS_ORDER.index(current["status"])
     except ValueError:
         st_index = 0
+    cur_mod = current.get("service_modality") or "cuenta_nombre_tercero"
+    try:
+        mod_index = SERVICE_MODALITY_ORDER.index(cur_mod)
+    except ValueError:
+        mod_index = 0
 
     with st.form("upd_account"):
+        new_modality_ix = st.selectbox(
+            "Modalidad de servicio",
+            options=list(range(len(SERVICE_MODALITY_ORDER))),
+            format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
+            index=mod_index,
+            help="Corregí la modalidad si la cuenta se mal clasificó al crearla.",
+        )
+        st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[new_modality_ix]])
         new_status = st.selectbox(
             "Estado",
             options=[x[0] for x in STATUS_OPTIONS],
@@ -188,7 +226,11 @@ else:
         save = st.form_submit_button("Guardar cambios")
     if save:
         old_st = current["status"]
-        upd = {"status": new_status, "technician_id": new_tech}
+        upd = {
+            "status": new_status,
+            "technician_id": new_tech,
+            "service_modality": SERVICE_MODALITY_ORDER[new_modality_ix],
+        }
         from datetime import timezone
 
         if new_tech and not current.get("technician_id"):

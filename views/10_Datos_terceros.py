@@ -113,6 +113,68 @@ def _show_license_photo(label: str, path: str | None):
         st.warning(f"{label + ': ' if label else ''}No se pudo mostrar ({e})")
 
 
+def _norm_license_number(value: str) -> str:
+    """Comparar licencias sin espacios ni guiones (evita duplicados por formato)."""
+    return "".join(c for c in (value or "").strip().lower() if c.isalnum())
+
+
+def _prepare_account_ids_and_check_license_conflicts(
+    sb_client,
+    labels: dict,
+    raw_ids: list,
+    license_number: str,
+    exclude_identity_id: str | None,
+) -> tuple[list[str] | None, str | None]:
+    """
+    Devuelve (lista de account_id limpia, mensaje de error).
+    - No permite la misma cuenta dos veces en el multiselect.
+    - No permite vincular esta licencia a una cuenta que ya tiene **otra** ficha con el mismo nº de licencia.
+    """
+    seen: set[str] = set()
+    clean: list[str] = []
+    for aid in raw_ids:
+        s = str(aid)
+        if s in seen:
+            return None, (
+                "Marcaste **la misma cuenta más de una vez**. Quitá el duplicado: una cuenta solo puede "
+                "vincularse una vez por ficha de datos terceros."
+            )
+        seen.add(s)
+        clean.append(s)
+
+    target = _norm_license_number(license_number)
+    if not target:
+        return clean, None
+
+    for aid in clean:
+        lr = sb_client.table("account_identity_links").select("identity_id").eq("account_id", aid).execute()
+        for link in lr.data or []:
+            oid = str(link["identity_id"])
+            if exclude_identity_id and oid == str(exclude_identity_id):
+                continue
+            ir = (
+                sb_client.table("third_party_identities")
+                .select("license_number,first_name,last_name")
+                .eq("id", oid)
+                .execute()
+            )
+            if not ir.data:
+                continue
+            other = ir.data[0]
+            if _norm_license_number(other.get("license_number") or "") != target:
+                continue
+            lbl = labels.get(aid, str(aid)[:8])
+            lic_disp = (other.get("license_number") or "").strip() or "—"
+            nom = f"{other.get('first_name', '')} {other.get('last_name', '')}".strip() or "otro registro"
+            return None, (
+                f"**No se puede guardar:** la cuenta **{lbl}** ya tiene vinculada una ficha distinta con el "
+                f"**mismo número de licencia** (`{lic_disp}`, {nom}). "
+                "Asignar de nuevo el mismo dato en esa cuenta duplicaría el uso; quitá esa cuenta de la lista o "
+                "revisá el registro existente."
+            )
+    return clean, None
+
+
 def _sync_links(identity_id: str, account_ids: list):
     sb.table("account_identity_links").delete().eq("identity_id", identity_id).execute()
     if not account_ids:
@@ -297,7 +359,11 @@ if edit_ok:
                     up_b = st.file_uploader("Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
 
             with st.container(border=True):
-                _card_start("5 · Cuentas y notas", "Vinculá las cuentas delivery donde aplicará esta licencia.")
+                _card_start(
+                    "5 · Cuentas y notas",
+                    "Podés vincular la misma licencia a **varias cuentas** (distintos clientes). "
+                    "No se permite repetir la **misma cuenta** ni usar el **mismo nº de licencia** dos veces en la misma cuenta.",
+                )
                 n_accounts = st.multiselect(
                     "Cuentas donde se asignará",
                     options=acct_ids,
@@ -313,43 +379,49 @@ if edit_ok:
             elif not n_exp:
                 st.error("Indicá fecha de expiración.")
             else:
-                payload = _payload_from_form(
-                    n_fn,
-                    n_ln,
-                    n_addr,
-                    n_lic,
-                    n_st,
-                    n_iss_st,
-                    n_dob,
-                    n_iss_d,
-                    n_exp,
-                    n_notes,
-                    plat_vals,
+                clean_accts, assign_err = _prepare_account_ids_and_check_license_conflicts(
+                    sb, acct_label, n_accounts, n_lic.strip(), None
                 )
-                try:
-                    ins = sb.table("third_party_identities").insert(payload).execute()
-                    new_id = str(ins.data[0]["id"])
-                    ext_f = "jpg"
-                    if up_f:
-                        ext_f = (up_f.name.rsplit(".", 1)[-1] if "." in up_f.name else "jpg").lower()
-                        if ext_f == "jpeg":
-                            ext_f = "jpg"
-                        pf = f"{new_id}/front.{ext_f}"
-                        storage_upload(token, pf, up_f.getvalue(), up_f.type or "image/jpeg")
-                        sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", new_id).execute()
-                    if up_b:
-                        ext_b = (up_b.name.rsplit(".", 1)[-1] if "." in up_b.name else "jpg").lower()
-                        if ext_b == "jpeg":
-                            ext_b = "jpg"
-                        pb = f"{new_id}/back.{ext_b}"
-                        storage_upload(token, pb, up_b.getvalue(), up_b.type or "image/jpeg")
-                        sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", new_id).execute()
-                    _sync_links(new_id, [str(x) for x in n_accounts])
-                    st.cache_data.clear()
-                    st.success("Registro creado.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
+                if assign_err:
+                    st.error(assign_err)
+                else:
+                    payload = _payload_from_form(
+                        n_fn,
+                        n_ln,
+                        n_addr,
+                        n_lic,
+                        n_st,
+                        n_iss_st,
+                        n_dob,
+                        n_iss_d,
+                        n_exp,
+                        n_notes,
+                        plat_vals,
+                    )
+                    try:
+                        ins = sb.table("third_party_identities").insert(payload).execute()
+                        new_id = str(ins.data[0]["id"])
+                        ext_f = "jpg"
+                        if up_f:
+                            ext_f = (up_f.name.rsplit(".", 1)[-1] if "." in up_f.name else "jpg").lower()
+                            if ext_f == "jpeg":
+                                ext_f = "jpg"
+                            pf = f"{new_id}/front.{ext_f}"
+                            storage_upload(token, pf, up_f.getvalue(), up_f.type or "image/jpeg")
+                            sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", new_id).execute()
+                        if up_b:
+                            ext_b = (up_b.name.rsplit(".", 1)[-1] if "." in up_b.name else "jpg").lower()
+                            if ext_b == "jpeg":
+                                ext_b = "jpg"
+                            pb = f"{new_id}/back.{ext_b}"
+                            storage_upload(token, pb, up_b.getvalue(), up_b.type or "image/jpeg")
+                            sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", new_id).execute()
+                        _sync_links(new_id, clean_accts or [])
+                        st.cache_data.clear()
+                        st.success("Registro creado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
 
 # --- Edición / baja ---
 if edit_ok and rows:
@@ -431,7 +503,10 @@ if edit_ok and rows:
                     u_b = st.file_uploader("Nuevo dorso", type=["jpg", "jpeg", "png", "webp"], key="ub")
 
             with st.container(border=True):
-                _card_start("5 · Cuentas y notas")
+                _card_start(
+                    "5 · Cuentas y notas",
+                    "La misma cuenta no puede figurar dos veces ni compartir el mismo nº de licencia con otra ficha ya vinculada a esa cuenta.",
+                )
                 linked = links_map.get(e_pick, [])
                 u_accounts = st.multiselect(
                     "Cuentas asignadas",
@@ -446,41 +521,47 @@ if edit_ok and rows:
             if not u_fn.strip() or not u_ln.strip() or not u_lic.strip():
                 st.error("Nombre, apellido y número de licencia son obligatorios.")
             else:
-                upd = _payload_from_form(
-                    u_fn,
-                    u_ln,
-                    u_addr,
-                    u_lic,
-                    u_st,
-                    u_iss_st,
-                    u_dob,
-                    u_isd,
-                    u_exp,
-                    u_notes,
-                    u_plat,
+                clean_edit, assign_err_e = _prepare_account_ids_and_check_license_conflicts(
+                    sb, acct_label, u_accounts, u_lic.strip(), e_pick
                 )
-                try:
-                    sb.table("third_party_identities").update(upd).eq("id", e_pick).execute()
-                    if u_f:
-                        ext = (u_f.name.rsplit(".", 1)[-1] if "." in u_f.name else "jpg").lower()
-                        if ext == "jpeg":
-                            ext = "jpg"
-                        pf = f"{e_pick}/front.{ext}"
-                        storage_upload(token, pf, u_f.getvalue(), u_f.type or "image/jpeg")
-                        sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", e_pick).execute()
-                    if u_b:
-                        ext = (u_b.name.rsplit(".", 1)[-1] if "." in u_b.name else "jpg").lower()
-                        if ext == "jpeg":
-                            ext = "jpg"
-                        pb = f"{e_pick}/back.{ext}"
-                        storage_upload(token, pb, u_b.getvalue(), u_b.type or "image/jpeg")
-                        sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", e_pick).execute()
-                    _sync_links(e_pick, [str(x) for x in u_accounts])
-                    st.cache_data.clear()
-                    st.success("Actualizado.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
+                if assign_err_e:
+                    st.error(assign_err_e)
+                else:
+                    upd = _payload_from_form(
+                        u_fn,
+                        u_ln,
+                        u_addr,
+                        u_lic,
+                        u_st,
+                        u_iss_st,
+                        u_dob,
+                        u_isd,
+                        u_exp,
+                        u_notes,
+                        u_plat,
+                    )
+                    try:
+                        sb.table("third_party_identities").update(upd).eq("id", e_pick).execute()
+                        if u_f:
+                            ext = (u_f.name.rsplit(".", 1)[-1] if "." in u_f.name else "jpg").lower()
+                            if ext == "jpeg":
+                                ext = "jpg"
+                            pf = f"{e_pick}/front.{ext}"
+                            storage_upload(token, pf, u_f.getvalue(), u_f.type or "image/jpeg")
+                            sb.table("third_party_identities").update({"photo_front_path": pf}).eq("id", e_pick).execute()
+                        if u_b:
+                            ext = (u_b.name.rsplit(".", 1)[-1] if "." in u_b.name else "jpg").lower()
+                            if ext == "jpeg":
+                                ext = "jpg"
+                            pb = f"{e_pick}/back.{ext}"
+                            storage_upload(token, pb, u_b.getvalue(), u_b.type or "image/jpeg")
+                            sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", e_pick).execute()
+                        _sync_links(e_pick, clean_edit or [])
+                        st.cache_data.clear()
+                        st.success("Actualizado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
 
         if delete_ok:
             if st.button("Eliminar registro y fotos", type="primary"):

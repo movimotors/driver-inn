@@ -32,3 +32,30 @@ ACCOUNT_STATUS_COLOR = {
 }
 
 SALE_TYPE_LABELS = {"venta": "Venta", "alquiler": "Alquiler"}
+
+# Modalidad de servicio (negocio): qué tipo de creación/gestión es la cuenta
+SERVICE_MODALITY_ORDER = [
+    "cuenta_nombre_tercero",
+    "cliente_licencia_sin_social",
+    "cliente_licencia_social_activacion_cupo",
+]
+
+SERVICE_MODALITY_LABELS = {
+    "cuenta_nombre_tercero": "Cuenta a nombre de tercero",
+    "cliente_licencia_sin_social": "Cliente con licencia — sin social (SSN)",
+    "cliente_licencia_social_activacion_cupo": "Cliente con licencia y SSN — activación por cupo",
+}
+
+SERVICE_MODALITY_HELP = {
+    "cuenta_nombre_tercero": (
+        "Se crea la cuenta usando **datos de un tercero** (licencia registrada en Datos terceros). "
+        "Vinculá esa ficha a esta cuenta en el módulo correspondiente."
+    ),
+    "cliente_licencia_sin_social": (
+        "El **cliente ya tiene licencia** pero **aún no tiene** número de seguro social (SSN) u otros datos sociales. "
+        "El flujo es distinto al de cuenta a nombre de tercero."
+    ),
+    "cliente_licencia_social_activacion_cupo": (
+        "El cliente **tiene licencia y SSN**; el trabajo es **activar** la cuenta cuando haya **cupo** en la plataforma."
+    ),
+}

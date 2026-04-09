@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from src.config import supabase_configured
-from src.constants import ACCOUNT_STATUS_LABELS, SALE_TYPE_LABELS
+from src.constants import ACCOUNT_STATUS_LABELS, SALE_TYPE_LABELS, SERVICE_MODALITY_LABELS
 from src.db import get_client
 from src.rbac import require_login
 
@@ -28,7 +28,7 @@ token = st.session_state.access_token
 def load_accounts(_token: str):
     sb = get_client(_token)
     r = sb.table("accounts").select(
-        "id, status, sale_type, delivered_at, rental_next_due_date, rental_weekly_amount, platform_id, client_id, technician_id"
+        "id, status, sale_type, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, platform_id, client_id, technician_id"
     ).execute()
     return r.data or []
 
@@ -55,6 +55,11 @@ df = pd.DataFrame(accounts)
 df["status_label"] = df["status"].map(lambda s: ACCOUNT_STATUS_LABELS.get(s, s))
 df["sale_label"] = df["sale_type"].map(lambda s: SALE_TYPE_LABELS.get(s, s))
 df["platform_name"] = df["platform_id"].map(lambda pid: platforms.get(pid, {}).get("name", pid))
+if "service_modality" not in df.columns:
+    df["service_modality"] = "cuenta_nombre_tercero"
+df["modality_label"] = df["service_modality"].apply(
+    lambda m: SERVICE_MODALITY_LABELS.get(m or "cuenta_nombre_tercero", m)
+)
 
 today = date.today()
 soon = today + timedelta(days=7)
@@ -93,6 +98,10 @@ with col_a:
 with col_b:
     st.subheader("Venta vs alquiler")
     st.bar_chart(df["sale_label"].value_counts())
+
+st.subheader("Por modalidad de servicio")
+st.caption("Tercero vs licencia sin SSN vs licencia + SSN (activación por cupo).")
+st.bar_chart(df["modality_label"].value_counts())
 
 st.subheader("Alertas de alquiler (vencido o próxima semana)")
 alert_df = df[df["rental_alert"].isin(["vencido", "próximo"])][
