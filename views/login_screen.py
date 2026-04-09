@@ -5,7 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 from src.auth_api import AuthError, request_password_recovery, sign_in_with_password, sign_up
-from src.config import supabase_configured
+from src.config import get_auth_redirect_url, supabase_configured
 from src.rbac import fetch_profile_for_user
 
 _LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo_driver_inn.png"
@@ -93,9 +93,19 @@ def render_auth_screen():
 
         with tab_reg:
             st.subheader("Crear cuenta")
+            _redir = get_auth_redirect_url()
             st.caption(
-                "Si en Supabase tenés **Confirm email** activado, tendrás que confirmar el correo antes de poder entrar."
+                "Si en Supabase tenés **Confirm email** activado, recibirás un enlace. "
+                "Ese enlace debe volver a **la URL pública de esta app** (no `localhost` si entrás desde otro dispositivo)."
             )
+            if supabase_configured() and not _redir:
+                st.warning(
+                    "Agregá en **Secrets** `AUTH_REDIRECT_URL` (o `PASSWORD_RESET_REDIRECT_URL`) con la URL de la app, "
+                    "por ejemplo `https://tu-app.streamlit.app`, y la **misma** URL en Supabase → **Authentication** → "
+                    "**URL configuration** → **Redirect URLs**. Si no, el correo suele generar un enlace que no abre bien."
+                )
+            elif supabase_configured() and _redir:
+                st.caption(f"URL de retorno configurada para el correo: `{_redir}`")
             if not supabase_configured():
                 st.warning("Configurá Secrets primero.")
             with st.form("signup_form"):
@@ -115,9 +125,16 @@ def render_auth_screen():
                     st.error("La contraseña debe tener al menos 6 caracteres.")
                 else:
                     try:
-                        sign_up(su_email.strip(), su_pw, full_name=su_name.strip() or None)
+                        sign_up(
+                            su_email.strip(),
+                            su_pw,
+                            full_name=su_name.strip() or None,
+                            redirect_to=_redir,
+                        )
                         st.success(
-                            "Cuenta creada. Si hay confirmación por correo, revisá tu email; si no, ya podés iniciar sesión."
+                            "Cuenta creada. Si hay confirmación por correo, abrí el enlace y luego **iniciá sesión** "
+                            "con el mismo correo y contraseña (Streamlit no inicia sesión solo desde el enlace). "
+                            "Revisá también la carpeta de spam."
                         )
                     except AuthError as e:
                         st.error(str(e))
@@ -137,13 +154,7 @@ def render_auth_screen():
                     st.error("Ingresá tu correo.")
                 else:
                     try:
-                        redirect_to = None
-                        try:
-                            if hasattr(st, "secrets") and "PASSWORD_RESET_REDIRECT_URL" in st.secrets:
-                                redirect_to = str(st.secrets["PASSWORD_RESET_REDIRECT_URL"]).strip() or None
-                        except Exception:
-                            redirect_to = None
-                        request_password_recovery(remail, redirect_to=redirect_to)
+                        request_password_recovery(remail, redirect_to=get_auth_redirect_url())
                         st.success("Si el correo existe, recibirás instrucciones en breve.")
                     except AuthError as e:
                         st.error(str(e))

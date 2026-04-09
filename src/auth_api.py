@@ -41,13 +41,25 @@ def sign_in_with_password(email: str, password: str) -> dict[str, Any]:
     return r.json()
 
 
-def sign_up(email: str, password: str, full_name: str | None = None) -> dict[str, Any]:
-    """Registro vía Supabase Auth (el trigger crea la fila en public.profiles)."""
+def sign_up(
+    email: str,
+    password: str,
+    full_name: str | None = None,
+    redirect_to: str | None = None,
+) -> dict[str, Any]:
+    """Registro vía Supabase Auth (el trigger crea la fila en public.profiles).
+
+    Si hay confirmación por correo, `redirect_to` debe ser la URL pública de la app y estar
+    permitida en Supabase (Redirect URLs); si no, el enlace suele usar el Site URL del panel
+    (a menudo localhost) y “no abre” en otro dispositivo o en producción.
+    """
     url, _ = get_supabase_config()
     endpoint = f"{url.rstrip('/')}/auth/v1/signup"
     body: dict[str, Any] = {"email": email.strip(), "password": password}
     if full_name:
         body["data"] = {"full_name": full_name}
+    if redirect_to:
+        body["redirect_to"] = redirect_to.strip()
     with httpx.Client(timeout=30.0) as client:
         r = client.post(endpoint, headers=_auth_headers(), json=body)
     if r.status_code not in (200, 201):

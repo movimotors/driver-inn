@@ -25,3 +25,28 @@ def get_supabase_config():
 def supabase_configured() -> bool:
     url, key = get_supabase_config()
     return bool(url and key)
+
+
+def get_auth_redirect_url() -> str | None:
+    """URL pública de la app para enlaces de correo (confirmar cuenta, recuperar contraseña).
+
+    Orden: Secrets AUTH_REDIRECT_URL → PASSWORD_RESET_REDIRECT_URL → variables de entorno.
+    Debe coincidir con una entrada en Supabase → Authentication → URL configuration → Redirect URLs.
+    """
+    try:
+        import streamlit as st
+
+        if hasattr(st, "secrets"):
+            sec = st.secrets
+            for key in ("AUTH_REDIRECT_URL", "PASSWORD_RESET_REDIRECT_URL"):
+                if sec.get(key):
+                    u = str(sec[key]).strip()
+                    if u:
+                        return u.rstrip("/")
+    except Exception:
+        pass
+    for env_key in ("AUTH_REDIRECT_URL", "PASSWORD_RESET_REDIRECT_URL"):
+        u = os.getenv(env_key, "").strip()
+        if u:
+            return u.rstrip("/")
+    return None

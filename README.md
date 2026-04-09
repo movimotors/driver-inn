@@ -33,7 +33,9 @@ update public.profiles set role = 'superusuario' where id = '<uuid del usuario>'
 2. **SQL Editor**: ejecutá [`supabase/migration_002_auth_profiles_rls.sql`](supabase/migration_002_auth_profiles_rls.sql) (sustituye las políticas abiertas de desarrollo por RLS con JWT).
 3. **SQL Editor** (opcional): [`supabase/migration_003_finance_telecom.sql`](supabase/migration_003_finance_telecom.sql) — cuentas por pagar/cobrar, gastos operativos, inventario telecom (datos, números, proxies, líneas) + RLS + filas de ejemplo. Si la ejecutás de nuevo, los `INSERT` duplicarán datos: comentá o borrá la sección de ejemplo.
 4. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
-5. **Authentication → URL configuration**: añadí la URL de tu app Streamlit (local y/o `*.streamlit.app`) para recuperación de contraseña.
+5. **Authentication → URL configuration**:
+   - **Site URL**: en producción, ponelá la URL pública de Streamlit (`https://TU-APP.streamlit.app`), no `localhost`, si los usuarios confirman correo desde el celular u otro equipo.
+   - **Redirect URLs**: añadí esa misma URL (y `http://localhost:8501` si probás en local). Aplica a **recuperación de contraseña** y a **confirmar registro por correo**.
 6. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
 
 ## Configuración local
@@ -59,12 +61,15 @@ Abre el navegador en la URL que muestre Streamlit (por defecto `http://localhost
 SUPABASE_URL = "https://xxxx.supabase.co"
 SUPABASE_KEY = "eyJ..."  # clave anon de Supabase
 
-# Opcional — recuperación de contraseña (mismo archivo Secrets, línea extra):
-PASSWORD_RESET_REDIRECT_URL = "https://TU-APP.streamlit.app"
+# URL pública de la app (enlaces de correo: confirmar cuenta + recuperar contraseña):
+AUTH_REDIRECT_URL = "https://TU-APP.streamlit.app"
+# (Si ya tenías la otra clave, también sirve:)
+# PASSWORD_RESET_REDIRECT_URL = "https://TU-APP.streamlit.app"
 ```
 
-3. **`PASSWORD_RESET_REDIRECT_URL` no se “activa” en otro lado**: solo existe si la agregás en **este mismo TOML de Secrets**. Es la URL pública de tu app (la que abre el visitante, con `https://`).
-4. En **Supabase → Authentication → URL configuration** tenés que **permitir** esa URL: en **Redirect URLs** agregá `https://TU-APP.streamlit.app/**` (o la URL exacta que uses). Si no, el enlace del correo de recuperación falla al volver a tu app.
+3. **`AUTH_REDIRECT_URL`** (o **`PASSWORD_RESET_REDIRECT_URL`**) es la base que Supabase usa en los enlaces del correo. Tiene que ser exactamente la URL que abre el usuario (con `https://` en Streamlit Cloud).
+4. En **Supabase → Authentication → URL configuration** tenés que **permitir** esa URL en **Redirect URLs** (por ejemplo `https://TU-APP.streamlit.app` y/o `https://TU-APP.streamlit.app/**`). Si no está permitida, el enlace del correo muestra error o no redirige a tu app.
+5. **Streamlit no lee el token del fragmento de la URL**: después de confirmar el correo, la cuenta queda activa; el usuario debe **iniciar sesión** manualmente en la pestaña “Iniciar sesión”.
 
 ## GitHub
 
