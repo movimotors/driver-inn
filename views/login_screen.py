@@ -22,7 +22,13 @@ def _hide_app_chrome():
         div[data-testid="stDecoration"] { display: none !important; }
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
-        .block-container { padding-top: 2rem !important; max-width: 520px !important; }
+        .block-container {
+            padding-top: clamp(1.5rem, 4vh, 3rem) !important;
+            padding-bottom: clamp(2rem, 5vh, 4rem) !important;
+            padding-left: clamp(1rem, 4vw, 2.5rem) !important;
+            padding-right: clamp(1rem, 4vw, 2.5rem) !important;
+            max-width: min(960px, 96vw) !important;
+        }
         div[data-testid="stTabs"] button { border-radius: 8px 8px 0 0 !important; }
         </style>
         """,
@@ -33,7 +39,7 @@ def _hide_app_chrome():
 def render_auth_screen():
     _hide_app_chrome()
 
-    c1, c2, c3 = st.columns([1, 2.2, 1])
+    c1, c2, c3 = st.columns([0.12, 0.76, 0.12])
     with c2:
         if _LOGO_PATH.is_file():
             st.image(str(_LOGO_PATH), use_container_width=True)
