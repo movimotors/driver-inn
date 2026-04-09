@@ -18,7 +18,7 @@ from src.constants import (
     SERVICE_MODALITY_LABELS,
     SERVICE_MODALITY_ORDER,
 )
-from src.db import get_client
+from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_TECNICO, require_login
 
 st.title("Cuentas delivery — semáforo de estado")
@@ -55,16 +55,7 @@ def load_lookups(_token: str):
 @st.cache_data(ttl=30)
 def load_accounts_full(_token: str):
     c = get_client(_token)
-    r = (
-        c.table("accounts")
-        .select(
-            "id, client_id, platform_id, technician_id, sale_type, status, service_modality, requirements_notes, "
-            "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
-        )
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return r.data or []
+    return fetch_accounts_list_with_modality_fallback(c)
 
 
 def status_badge(status: str) -> str:
@@ -79,10 +70,17 @@ if st.button("Refrescar"):
 
 try:
     clients, techs, plats = load_lookups(token)
-    accounts = load_accounts_full(token)
+    accounts, schema_has_service_modality = load_accounts_full(token)
 except Exception as e:
     st.error(f"Error al cargar datos: {e}")
     st.stop()
+
+if not schema_has_service_modality:
+    st.warning(
+        "La base **aún no tiene** la columna **service_modality** (modalidades de servicio). "
+        "Ejecutá en Supabase SQL Editor: **`supabase/migration_006_account_service_modality.sql`**. "
+        "Hasta entonces la app funciona en modo compatible, pero **no se guardará** la modalidad al crear/editar."
+    )
 
 cid = {c["id"]: c["name"] for c in clients}
 tid = {t["id"]: t["name"] for t in techs}
@@ -126,8 +124,12 @@ if can_create:
                 options=list(range(len(SERVICE_MODALITY_ORDER))),
                 format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
                 help="Define si la cuenta es a nombre de tercero, cliente con licencia sin SSN, o con SSN y activación por cupo.",
+                disabled=not schema_has_service_modality,
             )
-            st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
+            if schema_has_service_modality:
+                st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
+            else:
+                st.caption("Tras aplicar la migración 006 podrás guardar la modalidad.")
             sale_type = st.selectbox("Tipo", options=[x[0] for x in SALE_OPTIONS], format_func=lambda x: dict(SALE_OPTIONS)[x])
             status = st.selectbox(
                 "Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x]
@@ -150,11 +152,12 @@ if can_create:
                 "platform_id": platform_id,
                 "sale_type": sale_type,
                 "status": status,
-                "service_modality": SERVICE_MODALITY_ORDER[modality_ix],
                 "technician_id": technician_id,
                 "external_ref": ext or None,
                 "requirements_notes": req_notes or None,
             }
+            if schema_has_service_modality:
+                payload["service_modality"] = SERVICE_MODALITY_ORDER[modality_ix]
             if technician_id:
                 payload["assigned_at"] = now
             if sale_type == "alquiler" and rw and rw > 0:
@@ -204,8 +207,12 @@ else:
             format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
             index=mod_index,
             help="Corregí la modalidad si la cuenta se mal clasificó al crearla.",
+            disabled=not schema_has_service_modality,
         )
-        st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[new_modality_ix]])
+        if schema_has_service_modality:
+            st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[new_modality_ix]])
+        else:
+            st.caption("Migración 006 pendiente: la modalidad no se persiste.")
         new_status = st.selectbox(
             "Estado",
             options=[x[0] for x in STATUS_OPTIONS],
@@ -226,11 +233,9 @@ else:
         save = st.form_submit_button("Guardar cambios")
     if save:
         old_st = current["status"]
-        upd = {
-            "status": new_status,
-            "technician_id": new_tech,
-            "service_modality": SERVICE_MODALITY_ORDER[new_modality_ix],
-        }
+        upd = {"status": new_status, "technician_id": new_tech}
+        if schema_has_service_modality:
+            upd["service_modality"] = SERVICE_MODALITY_ORDER[new_modality_ix]
         from datetime import timezone
 
         if new_tech and not current.get("technician_id"):

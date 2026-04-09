@@ -59,3 +59,54 @@ SERVICE_MODALITY_HELP = {
         "El cliente **tiene licencia y SSN**; el trabajo es **activar** la cuenta cuando haya **cupo** en la plataforma."
     ),
 }
+
+# --- Datos terceros: semáforo de calidad del dato ---
+TPI_DATA_SEMAPHORE_ORDER = ["apto", "revisar", "background_malo"]
+
+TPI_DATA_SEMAPHORE_LABELS = {
+    "apto": "Apto — dato utilizable",
+    "revisar": "En revisión",
+    "background_malo": "Background malo (inutilizable)",
+}
+
+TPI_DATA_SEMAPHORE_HELP = {
+    "apto": "El dato puede vincularse a cuentas delivery.",
+    "revisar": "Aún no está validado para uso operativo.",
+    "background_malo": "**Cuidado:** el dato queda **bloqueado**: no se asigna a más cuentas ni clientes. Aparece en alertas y listado de dato malo.",
+}
+
+TPI_DATA_SEMAPHORE_COLOR = {
+    "apto": "#2E7D32",
+    "revisar": "#F9A825",
+    "background_malo": "#C62828",
+}
+
+# --- Kanban (flujo técnico) ---
+TPI_WORKFLOW_ORDER = [
+    "solicitud",
+    "asignada",
+    "en_proceso",
+    "en_revision",
+    "listo_cuentas",
+    "cerrado",
+]
+
+TPI_WORKFLOW_LABELS = {
+    "solicitud": "Solicitud",
+    "asignada": "Asignada al técnico",
+    "en_proceso": "En proceso",
+    "en_revision": "En revisión",
+    "listo_cuentas": "Listo para cuentas",
+    "cerrado": "Cerrado",
+}
+
+# Columnas del tablero (la primera es virtual: data_semaphore = background_malo)
+TPI_KANBAN_COLUMNS = [
+    ("dato_malo", "🚫 Dato malo (Background)"),
+    ("solicitud", "📥 Solicitud"),
+    ("asignada", "👷 Asignada"),
+    ("en_proceso", "⚙️ En proceso"),
+    ("en_revision", "🔍 En revisión"),
+    ("listo_cuentas", "✅ Listo para cuentas"),
+    ("cerrado", "📁 Cerrado"),
+]

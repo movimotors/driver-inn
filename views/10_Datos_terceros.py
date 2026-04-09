@@ -10,6 +10,14 @@ if str(_ROOT) not in sys.path:
 import streamlit as st
 
 from src.config import supabase_configured
+from src.constants import (
+    TPI_DATA_SEMAPHORE_COLOR,
+    TPI_DATA_SEMAPHORE_HELP,
+    TPI_DATA_SEMAPHORE_LABELS,
+    TPI_DATA_SEMAPHORE_ORDER,
+    TPI_WORKFLOW_LABELS,
+    TPI_WORKFLOW_ORDER,
+)
 from src.db import get_client
 from src.rbac import can_delete_datos_terceros, can_edit_datos_terceros, require_login
 from src.storage_api import storage_download, storage_remove, storage_upload
@@ -37,6 +45,9 @@ LICENSE_STATUS_OPTS = [
 STATUS_KEYS = [x[0] for x in LICENSE_STATUS_OPTS]
 STATUS_LABEL = dict(LICENSE_STATUS_OPTS)
 
+SEM_KEYS = list(TPI_DATA_SEMAPHORE_ORDER)
+SEM_LABEL = TPI_DATA_SEMAPHORE_LABELS
+
 PLATFORM_FIELDS = [
     ("use_doordash", "DoorDash"),
     ("use_instacart", "Instacart"),
@@ -59,6 +70,10 @@ def _card_start(title: str, hint: str | None = None) -> None:
 def _platform_labels_row(row: dict) -> str:
     parts = [lbl for key, lbl in PLATFORM_FIELDS if row.get(key)]
     return ", ".join(parts) if parts else "—"
+
+
+def _is_dato_malo(row: dict) -> bool:
+    return row.get("data_semaphore") == "background_malo"
 
 
 @st.cache_data(ttl=30)
@@ -100,6 +115,23 @@ def load_account_choices(_token: str):
     return choices
 
 
+@st.cache_data(ttl=60)
+def load_client_choices(_token: str):
+    c = get_client(_token)
+    rows = (c.table("clients").select("id,name").order("name").execute().data) or []
+    return [(x["id"], x.get("name") or "—") for x in rows]
+
+
+@st.cache_data(ttl=60)
+def load_technician_choices(_token: str):
+    c = get_client(_token)
+    rows = (
+        c.table("technicians").select("id,name").eq("active", True).order("name").execute().data
+        or []
+    )
+    return [(x["id"], x.get("name") or "—") for x in rows]
+
+
 def _show_license_photo(label: str, path: str | None):
     if not path:
         st.caption("Sin archivo cargado." if not label else f"{label}: sin archivo")
@@ -124,12 +156,32 @@ def _prepare_account_ids_and_check_license_conflicts(
     raw_ids: list,
     license_number: str,
     exclude_identity_id: str | None,
+    data_semaphore: str | None = None,
 ) -> tuple[list[str] | None, str | None]:
     """
     Devuelve (lista de account_id limpia, mensaje de error).
     - No permite la misma cuenta dos veces en el multiselect.
     - No permite vincular esta licencia a una cuenta que ya tiene **otra** ficha con el mismo nº de licencia.
+    - Bloquea si el registro ya está marcado Background malo o si se intenta combinar cuentas con ese semáforo.
     """
+    if data_semaphore == "background_malo" and raw_ids:
+        return None, (
+            "Con semáforo **Background malo** no podés vincular cuentas. Quitá las cuentas de la lista o cambiá el semáforo."
+        )
+
+    if exclude_identity_id:
+        ir = (
+            sb_client.table("third_party_identities")
+            .select("data_semaphore")
+            .eq("id", exclude_identity_id)
+            .execute()
+        )
+        if ir.data and ir.data[0].get("data_semaphore") == "background_malo":
+            if raw_ids:
+                return None, (
+                    "Este dato está **bloqueado (Background malo)**. No se pueden añadir ni mantener vínculos a cuentas."
+                )
+
     seen: set[str] = set()
     clean: list[str] = []
     for aid in raw_ids:
@@ -205,8 +257,9 @@ def _payload_from_form(
     expires,
     notes: str,
     platforms: dict[str, bool],
+    extra: dict | None = None,
 ) -> dict:
-    return {
+    d = {
         "first_name": first_name.strip(),
         "last_name": last_name.strip(),
         "address_line": address.strip() or None,
@@ -219,6 +272,9 @@ def _payload_from_form(
         "notes": notes.strip() or None,
         **platforms,
     }
+    if extra:
+        d.update(extra)
+    return d
 
 
 if st.button("Refrescar"):
@@ -229,18 +285,45 @@ try:
     rows = load_identities(token)
     links_map = load_links_by_identity(token)
     acct_choices = load_account_choices(token)
+    client_opts = load_client_choices(token)
+    tech_opts = load_technician_choices(token)
 except Exception as e:
     st.error(f"Error al cargar datos: {e}")
-    st.info("¿Ejecutaste **migration_005_datos_terceros.sql** en Supabase y creaste el bucket **license-photos**?")
+    st.info(
+        "¿Ejecutaste **migration_005** (tabla + Storage) y **migration_007** (cliente, técnico, flujo y semáforo)?"
+    )
     st.stop()
 
 acct_ids = [x[0] for x in acct_choices]
 acct_label = dict(acct_choices)
+cid_list = [x[0] for x in client_opts]
+cid_lab = dict(client_opts)
+tid_list = [x[0] for x in tech_opts]
+tid_lab = dict(tech_opts)
 
 st.caption(
-    "Registro de licencias de conductor para uso en plataformas. Las fotos se guardan en Storage (**license-photos**). "
-    "Vinculá las **cuentas delivery** donde aplicará esta identidad."
+    "Cada solicitud va ligada al **cliente** que pide el servicio y al **técnico** que lo ejecuta. "
+    "El **tablero Kanban** sirve para mover el estado del trámite. El **semáforo** indica si el dato es apto; "
+    "**Background malo** lo bloquea para siempre en cuentas nuevas."
 )
+
+malo_rows = [r for r in rows if _is_dato_malo(r)]
+if malo_rows:
+    st.error(
+        f"**Alerta · Dato malo:** {len(malo_rows)} registro(s) con **Background malo** — "
+        "no deben usarse en cuentas nuevas. Revisá el listado abajo."
+    )
+    with st.container(border=True):
+        _card_start("Listado · datos bloqueados (Background malo)", "Solo lectura operativa; rehabilitá el semáforo solo si hubo error.")
+        for mr in malo_rows:
+            with st.container(border=True):
+                st.markdown(
+                    f"**{mr.get('first_name', '')} {mr.get('last_name', '')}** · `{mr.get('license_number', '')}`"
+                )
+                st.caption(
+                    f"Cliente: {cid_lab.get(str(mr.get('request_client_id')), '—')} · "
+                    f"Técnico: {tid_lab.get(str(mr.get('assigned_technician_id')), '—')}"
+                )
 
 # --- Tabla resumen ---
 summary = []
@@ -254,6 +337,10 @@ for r in rows:
         {
             "Nombre": f"{r.get('first_name', '')} {r.get('last_name', '')}".strip(),
             "Nº licencia": r.get("license_number"),
+            "Cliente sol.": cid_lab.get(str(r.get("request_client_id")), "—"),
+            "Técnico": tid_lab.get(str(r.get("assigned_technician_id")), "—"),
+            "Flujo": TPI_WORKFLOW_LABELS.get(r.get("workflow_status"), r.get("workflow_status") or "—"),
+            "Semáforo": SEM_LABEL.get(r.get("data_semaphore"), r.get("data_semaphore") or "—"),
             "Estado lic.": STATUS_LABEL.get(r.get("license_status"), r.get("license_status")),
             "Vence": str(r.get("license_expiry_date") or "")[:10],
             "Plataformas": _platform_labels_row(r),
@@ -263,7 +350,7 @@ for r in rows:
     )
 st.subheader("Listado")
 with st.container(border=True):
-    st.caption("Vista rápida de todas las licencias registradas.")
+    st.caption("Vista rápida: solicitud, equipo, flujo, semáforo y cuentas vinculadas.")
     st.dataframe(
         [{k: v for k, v in s.items() if k != "_id"} for s in summary],
         use_container_width=True,
@@ -282,6 +369,21 @@ else:
         format_func=lambda i: f"{by_id[i].get('first_name')} {by_id[i].get('last_name')} — {by_id[i].get('license_number')}",
     )
     cur = by_id[pick]
+    with st.container(border=True):
+        _card_start("Solicitud y control del dato")
+        c_sem = TPI_DATA_SEMAPHORE_COLOR.get(cur.get("data_semaphore"), "#757575")
+        st.markdown(
+            f"**Cliente (solicitud):** {cid_lab.get(str(cur.get('request_client_id')), '—')} · "
+            f"**Técnico:** {tid_lab.get(str(cur.get('assigned_technician_id')), '—')}"
+        )
+        st.markdown(
+            f"**Flujo:** {TPI_WORKFLOW_LABELS.get(cur.get('workflow_status'), cur.get('workflow_status') or '—')} · "
+            f"<span style='color:{c_sem};font-weight:600;'>Semáforo: "
+            f"{SEM_LABEL.get(cur.get('data_semaphore'), cur.get('data_semaphore') or '—')}</span>",
+            unsafe_allow_html=True,
+        )
+        if _is_dato_malo(cur):
+            st.error("Este dato está **bloqueado (Background malo)** — no se asigna a más cuentas.")
     ph1, ph2 = st.columns(2)
     with ph1:
         with st.container(border=True):
@@ -304,6 +406,45 @@ else:
 if edit_ok:
     with st.expander("➕ Nueva licencia / datos terceros", expanded=not rows):
         with st.form("new_id"):
+            with st.container(border=True):
+                _card_start(
+                    "0 · Solicitud y equipo",
+                    "**Cliente** que encarga el trámite y **técnico** que lo ejecuta (podés dejar técnico sin asignar al inicio).",
+                )
+                if not cid_list:
+                    st.warning("Creá al menos un **cliente** en la pantalla Clientes.")
+                n_req_client = st.selectbox(
+                    "Cliente que hace la solicitud *",
+                    options=cid_list,
+                    format_func=lambda x: cid_lab.get(x, str(x)),
+                    help="Quien contrata / pide el uso del dato de tercero.",
+                )
+                topts = [None] + tid_list
+                n_tech = st.selectbox(
+                    "Técnico asignado",
+                    options=topts,
+                    format_func=lambda x: "— Todavía sin asignar —" if x is None else tid_lab.get(x, str(x)),
+                    help="Quien procesa la solicitud en campo; luego puede mover el tablero Kanban.",
+                )
+                n_sem = st.selectbox(
+                    "Semáforo del dato",
+                    options=SEM_KEYS,
+                    format_func=lambda x: SEM_LABEL[x],
+                    index=SEM_KEYS.index("revisar"),
+                )
+                st.caption(TPI_DATA_SEMAPHORE_HELP.get(n_sem, ""))
+                wf_default = "asignada" if n_tech else "solicitud"
+                try:
+                    wf_ix = TPI_WORKFLOW_ORDER.index(wf_default)
+                except ValueError:
+                    wf_ix = 0
+                n_wf = st.selectbox(
+                    "Estado del flujo (Kanban)",
+                    options=list(range(len(TPI_WORKFLOW_ORDER))),
+                    format_func=lambda i: TPI_WORKFLOW_LABELS[TPI_WORKFLOW_ORDER[i]],
+                    index=wf_ix,
+                )
+
             with st.container(border=True):
                 _card_start("1 · Datos de la persona", "Como figuran en el documento o licencia.")
                 c_a, c_b = st.columns(2)
@@ -364,11 +505,14 @@ if edit_ok:
                     "Podés vincular la misma licencia a **varias cuentas** (distintos clientes). "
                     "No se permite repetir la **misma cuenta** ni usar el **mismo nº de licencia** dos veces en la misma cuenta.",
                 )
+                if n_sem == "background_malo":
+                    st.warning("**Background malo:** no se pueden vincular cuentas a este registro.")
                 n_accounts = st.multiselect(
                     "Cuentas donde se asignará",
                     options=acct_ids,
                     format_func=lambda x: acct_label.get(x, str(x)),
                     placeholder="Buscá por cliente o plataforma…",
+                    disabled=n_sem == "background_malo",
                 )
                 n_notes = st.text_area("Notas internas (opcional)", placeholder="Observaciones solo para el equipo…", height=100)
 
@@ -376,15 +520,29 @@ if edit_ok:
         if sub:
             if not n_fn.strip() or not n_ln.strip() or not n_lic.strip():
                 st.error("Nombre, apellido y número de licencia son obligatorios.")
+            elif not cid_list:
+                st.error("Necesitás un cliente en el sistema para registrar la solicitud.")
+            elif not n_req_client:
+                st.error("Elegí el cliente que hace la solicitud.")
             elif not n_exp:
                 st.error("Indicá fecha de expiración.")
             else:
-                clean_accts, assign_err = _prepare_account_ids_and_check_license_conflicts(
-                    sb, acct_label, n_accounts, n_lic.strip(), None
-                )
+                if n_sem == "background_malo":
+                    clean_accts: list = []
+                    assign_err = None
+                else:
+                    clean_accts, assign_err = _prepare_account_ids_and_check_license_conflicts(
+                        sb, acct_label, n_accounts, n_lic.strip(), None, n_sem
+                    )
                 if assign_err:
                     st.error(assign_err)
                 else:
+                    extra_new = {
+                        "request_client_id": n_req_client,
+                        "assigned_technician_id": n_tech,
+                        "data_semaphore": n_sem,
+                        "workflow_status": TPI_WORKFLOW_ORDER[n_wf],
+                    }
                     payload = _payload_from_form(
                         n_fn,
                         n_ln,
@@ -397,6 +555,7 @@ if edit_ok:
                         n_exp,
                         n_notes,
                         plat_vals,
+                        extra=extra_new,
                     )
                     try:
                         ins = sb.table("third_party_identities").insert(payload).execute()
@@ -438,7 +597,55 @@ if edit_ok and rows:
             st_ix = STATUS_KEYS.index(cur.get("license_status") or "vigente")
         except ValueError:
             st_ix = 0
+        try:
+            u_sem_ix = SEM_KEYS.index(cur.get("data_semaphore") or "revisar")
+        except ValueError:
+            u_sem_ix = 1
+        try:
+            u_wf_ix = TPI_WORKFLOW_ORDER.index(cur.get("workflow_status") or "solicitud")
+        except ValueError:
+            u_wf_ix = 0
+        cu_blocked = _is_dato_malo(cur)
+
+        def _ix_in(lst, val):
+            try:
+                return lst.index(val)
+            except (ValueError, TypeError):
+                return 0
+
         with st.form("upd_id"):
+            with st.container(border=True):
+                _card_start(
+                    "0 · Solicitud y equipo",
+                    "Actualizá cliente, técnico, flujo y semáforo. **Background malo** vacía los vínculos a cuentas.",
+                )
+                u_req_client = st.selectbox(
+                    "Cliente que hace la solicitud *",
+                    options=cid_list,
+                    index=_ix_in(cid_list, cur.get("request_client_id")),
+                    format_func=lambda x: cid_lab.get(x, str(x)),
+                )
+                utopts = [None] + tid_list
+                u_tech = st.selectbox(
+                    "Técnico asignado",
+                    options=utopts,
+                    index=_ix_in(utopts, cur.get("assigned_technician_id")),
+                    format_func=lambda x: "— Sin asignar —" if x is None else tid_lab.get(x, str(x)),
+                )
+                u_sem = st.selectbox(
+                    "Semáforo del dato",
+                    options=SEM_KEYS,
+                    format_func=lambda x: SEM_LABEL[x],
+                    index=u_sem_ix,
+                )
+                st.caption(TPI_DATA_SEMAPHORE_HELP.get(u_sem, ""))
+                u_wf = st.selectbox(
+                    "Estado del flujo (Kanban)",
+                    options=list(range(len(TPI_WORKFLOW_ORDER))),
+                    format_func=lambda i: TPI_WORKFLOW_LABELS[TPI_WORKFLOW_ORDER[i]],
+                    index=u_wf_ix,
+                )
+
             with st.container(border=True):
                 _card_start("1 · Datos de la persona")
                 uc1, uc2 = st.columns(2)
@@ -507,12 +714,15 @@ if edit_ok and rows:
                     "5 · Cuentas y notas",
                     "La misma cuenta no puede figurar dos veces ni compartir el mismo nº de licencia con otra ficha ya vinculada a esa cuenta.",
                 )
+                if cu_blocked or u_sem == "background_malo":
+                    st.warning("**Background malo:** no se permiten vínculos a cuentas. Guardá para limpiar vínculos existentes.")
                 linked = links_map.get(e_pick, [])
                 u_accounts = st.multiselect(
                     "Cuentas asignadas",
                     options=acct_ids,
                     default=[x for x in linked if x in acct_ids],
                     format_func=lambda x: acct_label.get(x, str(x)),
+                    disabled=cu_blocked or (u_sem == "background_malo"),
                 )
                 u_notes = st.text_area("Notas internas", value=cur.get("notes") or "", height=100)
 
@@ -520,13 +730,25 @@ if edit_ok and rows:
         if save:
             if not u_fn.strip() or not u_ln.strip() or not u_lic.strip():
                 st.error("Nombre, apellido y número de licencia son obligatorios.")
+            elif not u_req_client:
+                st.error("Elegí el cliente de la solicitud.")
             else:
-                clean_edit, assign_err_e = _prepare_account_ids_and_check_license_conflicts(
-                    sb, acct_label, u_accounts, u_lic.strip(), e_pick
-                )
+                if u_sem == "background_malo":
+                    clean_edit = []
+                    assign_err_e = None
+                else:
+                    clean_edit, assign_err_e = _prepare_account_ids_and_check_license_conflicts(
+                        sb, acct_label, u_accounts, u_lic.strip(), e_pick, u_sem
+                    )
                 if assign_err_e:
                     st.error(assign_err_e)
                 else:
+                    extra_u = {
+                        "request_client_id": u_req_client,
+                        "assigned_technician_id": u_tech,
+                        "data_semaphore": u_sem,
+                        "workflow_status": TPI_WORKFLOW_ORDER[u_wf],
+                    }
                     upd = _payload_from_form(
                         u_fn,
                         u_ln,
@@ -539,6 +761,7 @@ if edit_ok and rows:
                         u_exp,
                         u_notes,
                         u_plat,
+                        extra=extra_u,
                     )
                     try:
                         sb.table("third_party_identities").update(upd).eq("id", e_pick).execute()

@@ -131,3 +131,61 @@ def get_client(access_token: str | None = None) -> _Client:
 
 def clear_client_cache():
     pass
+
+
+_ACCOUNTS_LIST_COLS_V2 = (
+    "id, client_id, platform_id, technician_id, sale_type, status, service_modality, requirements_notes, "
+    "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
+)
+_ACCOUNTS_LIST_COLS_V1 = (
+    "id, client_id, platform_id, technician_id, sale_type, status, requirements_notes, "
+    "assigned_at, delivered_at, rental_weekly_amount, rental_next_due_date, external_ref, created_at"
+)
+
+_ACCOUNTS_DASH_COLS_V2 = (
+    "id, status, sale_type, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, "
+    "platform_id, client_id, technician_id"
+)
+_ACCOUNTS_DASH_COLS_V1 = (
+    "id, status, sale_type, delivered_at, rental_next_due_date, rental_weekly_amount, "
+    "platform_id, client_id, technician_id"
+)
+
+
+def fetch_accounts_list_with_modality_fallback(client: _Client) -> tuple[list[dict], bool]:
+    """Devuelve (filas, True) si existe `service_modality`; si PostgREST 400, reintenta sin la columna."""
+    try:
+        r = (
+            client.table("accounts")
+            .select(_ACCOUNTS_LIST_COLS_V2)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return (r.data or [], True)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 400:
+            r = (
+                client.table("accounts")
+                .select(_ACCOUNTS_LIST_COLS_V1)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            rows = r.data or []
+            for row in rows:
+                row.setdefault("service_modality", "cuenta_nombre_tercero")
+            return (rows, False)
+        raise
+
+
+def fetch_accounts_dashboard_with_modality_fallback(client: _Client) -> tuple[list[dict], bool]:
+    try:
+        r = client.table("accounts").select(_ACCOUNTS_DASH_COLS_V2).execute()
+        return (r.data or [], True)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 400:
+            r = client.table("accounts").select(_ACCOUNTS_DASH_COLS_V1).execute()
+            rows = r.data or []
+            for row in rows:
+                row.setdefault("service_modality", "cuenta_nombre_tercero")
+            return (rows, False)
+        raise

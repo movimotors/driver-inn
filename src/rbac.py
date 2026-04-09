@@ -23,6 +23,9 @@ ROLE_LABELS = {
 
 ALL_ROLES = [ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR, ROLE_TECNICO]
 
+# Quién puede ver el tablero Kanban de datos terceros
+DATOS_TERCEROS_KANBAN_ROLES = [ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR, ROLE_TECNICO]
+
 # Registro público: solo estos (super/admin los asigna un administrador).
 SELF_SIGNUP_ROLE_OPTIONS: dict[str, str] = {
     ROLE_VENDEDOR: "Vendedor — clientes, cuentas, alquileres y finanzas",
@@ -55,6 +58,7 @@ def _nav_full() -> dict[str, list[NavPage]]:
             NavPage("views/8_Por_cobrar.py", "Por cobrar", "📥"),
             NavPage("views/9_Gastos_operativos.py", "Gastos", "🧾"),
             NavPage("views/10_Datos_terceros.py", "Datos terceros", "🪪"),
+            NavPage("views/11_Kanban_datos_terceros.py", "Tablero solicitudes", "📋"),
         ],
         "Administración": [
             NavPage("views/6_Admin_usuarios.py", "Usuarios y roles", "⚙️"),
@@ -75,6 +79,7 @@ def _nav_vendedor() -> dict[str, list[NavPage]]:
             NavPage("views/8_Por_cobrar.py", "Por cobrar", "📥"),
             NavPage("views/9_Gastos_operativos.py", "Gastos", "🧾"),
             NavPage("views/10_Datos_terceros.py", "Datos terceros", "🪪"),
+            NavPage("views/11_Kanban_datos_terceros.py", "Tablero solicitudes", "📋"),
         ],
     }
 
@@ -87,6 +92,7 @@ def _nav_tecnico() -> dict[str, list[NavPage]]:
         ],
         "Recursos": [
             NavPage("views/10_Datos_terceros.py", "Datos terceros", "🪪"),
+            NavPage("views/11_Kanban_datos_terceros.py", "Tablero solicitudes", "📋"),
         ],
     }
 
@@ -124,6 +130,24 @@ def logout():
     for k in ("access_token", "user_id", "user_email", "user_role", "refresh_token"):
         st.session_state[k] = None
     st.cache_data.clear()
+
+
+def get_my_technician_row(access_token: str | None = None) -> dict | None:
+    """Registro en `technicians` cuyo `auth_user_id` coincide con el usuario logueado."""
+    init_session_state()
+    uid = st.session_state.get("user_id")
+    if not uid:
+        return None
+    tok = access_token or st.session_state.get("access_token")
+    if not tok:
+        return None
+    try:
+        c = get_client(tok)
+        r = c.table("technicians").select("id,name,auth_user_id").eq("auth_user_id", uid).execute()
+        rows = r.data or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
 
 
 def fetch_profile_for_user(access_token: str, user_id: str) -> dict | None:

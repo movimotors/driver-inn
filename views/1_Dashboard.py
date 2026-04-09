@@ -11,7 +11,7 @@ import streamlit as st
 
 from src.config import supabase_configured
 from src.constants import ACCOUNT_STATUS_LABELS, SALE_TYPE_LABELS, SERVICE_MODALITY_LABELS
-from src.db import get_client
+from src.db import fetch_accounts_dashboard_with_modality_fallback, get_client
 from src.rbac import require_login
 
 st.title("Resumen gerencial")
@@ -27,10 +27,8 @@ token = st.session_state.access_token
 @st.cache_data(ttl=60)
 def load_accounts(_token: str):
     sb = get_client(_token)
-    r = sb.table("accounts").select(
-        "id, status, sale_type, service_modality, delivered_at, rental_next_due_date, rental_weekly_amount, platform_id, client_id, technician_id"
-    ).execute()
-    return r.data or []
+    rows, _ = fetch_accounts_dashboard_with_modality_fallback(sb)
+    return rows
 
 
 @st.cache_data(ttl=120)
