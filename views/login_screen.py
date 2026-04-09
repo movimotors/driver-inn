@@ -95,17 +95,21 @@ def render_auth_screen():
             st.subheader("Crear cuenta")
             _redir = get_auth_redirect_url()
             st.caption(
-                "Si en Supabase tenés **Confirm email** activado, recibirás un enlace. "
-                "Ese enlace debe volver a **la URL pública de esta app** (no `localhost` si entrás desde otro dispositivo)."
+                "Completá los datos. Si te piden confirmar el correo, revisá tu bandeja (y spam); "
+                "después entrá con **Iniciar sesión**."
             )
             if supabase_configured() and not _redir:
                 st.warning(
-                    "Agregá en **Secrets** `AUTH_REDIRECT_URL` (o `PASSWORD_RESET_REDIRECT_URL`) con la URL de la app, "
-                    "por ejemplo `https://tu-app.streamlit.app`, y la **misma** URL en Supabase → **Authentication** → "
-                    "**URL configuration** → **Redirect URLs**. Si no, el correo suele generar un enlace que no abre bien."
+                    "Falta la URL pública de la app en **Secrets** (`AUTH_REDIRECT_URL`). "
+                    "Sin eso, el enlace del correo puede fallar."
                 )
             elif supabase_configured() and _redir:
-                st.caption(f"URL de retorno configurada para el correo: `{_redir}`")
+                with st.expander("¿Problemas con el enlace del correo?", expanded=False):
+                    st.markdown(
+                        f"URL configurada para volver a la app: `{_redir}`. "
+                        "Tiene que estar también en Supabase → **Authentication** → **URL configuration** → **Redirect URLs**. "
+                        "Si confirmás el mail desde el celular, no puede quedar solo `localhost` en el panel de Supabase."
+                    )
             if not supabase_configured():
                 st.warning("Configurá Secrets primero.")
             with st.form("signup_form"):
