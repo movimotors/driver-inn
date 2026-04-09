@@ -7,6 +7,8 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
+import httpx
+
 from src.config import supabase_configured
 from src.constants import (
     ACCOUNT_STATUS_LABELS,
@@ -29,6 +31,28 @@ require_roles([ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR])
 
 token = st.session_state.access_token
 sb = get_client(token)
+
+
+def _clients_support_default_modality(_sb) -> bool:
+    try:
+        _sb.table("clients").select("default_service_modality").limit(1).execute()
+        return True
+    except httpx.HTTPStatusError as e:
+        # PostgREST 400: columna no existe
+        if e.response is not None and e.response.status_code == 400:
+            return False
+        return False
+    except Exception:
+        return False
+
+
+schema_has_client_default_modality = _clients_support_default_modality(sb)
+if not schema_has_client_default_modality:
+    st.warning(
+        "Tu base aún no tiene `clients.default_service_modality`. "
+        "Ejecutá en Supabase SQL Editor: **`supabase/migration_009_client_defaults_and_account_execution.sql`**. "
+        "Hasta entonces podrás crear/editar clientes, pero **no** se guardará la modalidad por defecto."
+    )
 
 
 @st.cache_data(ttl=30)
@@ -80,21 +104,22 @@ with st.expander("➕ Nuevo cliente", expanded=False):
             index=0,
             help="Se sugerirá automáticamente al crear cuentas para este cliente.",
             key="cl_def_mod",
+            disabled=not schema_has_client_default_modality,
         )
         submitted = st.form_submit_button("Guardar")
     if submitted:
         if not name.strip():
             st.warning("El nombre es obligatorio.")
         else:
-            ins = sb.table("clients").insert(
-                {
-                    "name": name.strip(),
-                    "email": email or None,
-                    "phone": phone or None,
-                    "notes": notes or None,
-                    "default_service_modality": SERVICE_MODALITY_ORDER[default_mod_ix],
-                }
-            ).execute()
+            payload = {
+                "name": name.strip(),
+                "email": email or None,
+                "phone": phone or None,
+                "notes": notes or None,
+            }
+            if schema_has_client_default_modality:
+                payload["default_service_modality"] = SERVICE_MODALITY_ORDER[default_mod_ix]
+            ins = sb.table("clients").insert(payload).execute()
             st.cache_data.clear()
             new_id = str(ins.data[0]["id"]) if ins.data else None
             if new_id:
@@ -128,6 +153,7 @@ with st.expander("✏️ Editar cliente", expanded=False):
                 options=list(range(len(SERVICE_MODALITY_ORDER))),
                 format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
                 index=cur_ix,
+                disabled=not schema_has_client_default_modality,
             )
             save = st.form_submit_button("Guardar")
         if save:
@@ -135,15 +161,15 @@ with st.expander("✏️ Editar cliente", expanded=False):
                 if not name.strip():
                     st.error("El nombre es obligatorio.")
                 else:
-                    sb.table("clients").update(
-                        {
-                            "name": name.strip(),
-                            "email": email or None,
-                            "phone": phone or None,
-                            "notes": notes or None,
-                            "default_service_modality": SERVICE_MODALITY_ORDER[new_ix],
-                        }
-                    ).eq("id", pick).execute()
+                    payload = {
+                        "name": name.strip(),
+                        "email": email or None,
+                        "phone": phone or None,
+                        "notes": notes or None,
+                    }
+                    if schema_has_client_default_modality:
+                        payload["default_service_modality"] = SERVICE_MODALITY_ORDER[new_ix]
+                    sb.table("clients").update(payload).eq("id", pick).execute()
                 st.cache_data.clear()
                 st.success("Actualizado.")
                 st.rerun()
