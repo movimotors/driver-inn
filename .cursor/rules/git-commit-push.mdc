@@ -1,0 +1,16 @@
+---
+description: Tras cambios en el repo, siempre commit y push a main
+alwaysApply: true
+---
+
+# Git: commit y push obligatorio
+
+En el proyecto **Driver Inn** (`delivery`), cuando se modifiquen archivos de código, SQL, config o documentación funcional:
+
+1. **Antes de dar por cerrada la tarea:** `git status` → `git add` de lo relevante (no subir `.env` ni secretos).
+2. **Commit** con mensaje claro en español o inglés, una línea que diga qué cambió y por qué.
+3. **`git push origin main`** (o la rama acordada). No dejar la tarea “solo en local” si el usuario pidió mantener el remoto al día.
+
+**Excepciones (no hace falta commit):** solo lectura, explicaciones sin tocar archivos, o el usuario pidió explícitamente no commitear.
+
+Si el push falla, intentar `git pull --rebase origin main` y volver a push, o informar el error concreto.

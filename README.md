@@ -82,6 +82,8 @@ git push -u origin main
 
 **No subas** el archivo `.env` ni secretos; ya están en `.gitignore`.
 
+**Retomar después de un corte:** actualizá y leé [`CONTINUE_AQUI.md`](CONTINUE_AQUI.md) antes de seguir; en Cursor podés pedir que lo lean al reabrir el proyecto.
+
 ## Estructura
 
 | Ruta | Descripción |
