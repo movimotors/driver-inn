@@ -46,6 +46,7 @@ def sign_up(
     password: str,
     full_name: str | None = None,
     redirect_to: str | None = None,
+    signup_role: str | None = None,
 ) -> dict[str, Any]:
     """Registro vía Supabase Auth (el trigger crea la fila en public.profiles).
 
@@ -56,8 +57,13 @@ def sign_up(
     url, _ = get_supabase_config()
     endpoint = f"{url.rstrip('/')}/auth/v1/signup"
     body: dict[str, Any] = {"email": email.strip(), "password": password}
+    meta: dict[str, Any] = {}
     if full_name:
-        body["data"] = {"full_name": full_name}
+        meta["full_name"] = full_name
+    if signup_role:
+        meta["signup_role"] = signup_role.strip().lower()
+    if meta:
+        body["data"] = meta
     if redirect_to:
         body["redirect_to"] = redirect_to.strip()
     with httpx.Client(timeout=30.0) as client:

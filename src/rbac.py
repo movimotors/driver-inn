@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import streamlit as st
 
 from src.config import supabase_configured
@@ -21,8 +23,82 @@ ROLE_LABELS = {
 
 ALL_ROLES = [ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR, ROLE_TECNICO]
 
+# Registro público: solo estos (super/admin los asigna un administrador).
+SELF_SIGNUP_ROLE_OPTIONS: dict[str, str] = {
+    ROLE_VENDEDOR: "Vendedor — clientes, cuentas, alquileres y finanzas",
+    ROLE_TECNICO: "Técnico — cuentas asignadas e inventario telecom vinculado a tu usuario",
+}
+
 # Finanzas (por pagar / cobrar / gastos): sin técnico
 FINANCE_ROLES = [ROLE_SUPER, ROLE_ADMIN, ROLE_VENDEDOR]
+
+
+@dataclass(frozen=True)
+class NavPage:
+    path: str
+    title: str
+    icon: str
+    default: bool = False
+
+
+def _nav_full() -> dict[str, list[NavPage]]:
+    return {
+        "Operación": [
+            NavPage("views/1_Dashboard.py", "Dashboard", "📊", default=True),
+            NavPage("views/2_Clientes.py", "Clientes", "👤"),
+            NavPage("views/3_Tecnicos.py", "Técnicos", "🔧"),
+            NavPage("views/4_Cuentas.py", "Cuentas", "📦"),
+            NavPage("views/5_Alquileres_y_alertas.py", "Alquileres", "💳"),
+        ],
+        "Finanzas e inventario": [
+            NavPage("views/7_Por_pagar.py", "Por pagar", "📤"),
+            NavPage("views/8_Por_cobrar.py", "Por cobrar", "📥"),
+            NavPage("views/9_Gastos_operativos.py", "Gastos", "🧾"),
+            NavPage("views/10_Inventario_telecom.py", "Inventario telecom", "📡"),
+        ],
+        "Administración": [
+            NavPage("views/6_Admin_usuarios.py", "Usuarios y roles", "⚙️"),
+        ],
+    }
+
+
+def _nav_vendedor() -> dict[str, list[NavPage]]:
+    return {
+        "Operación": [
+            NavPage("views/1_Dashboard.py", "Dashboard", "📊", default=True),
+            NavPage("views/2_Clientes.py", "Clientes", "👤"),
+            NavPage("views/4_Cuentas.py", "Cuentas", "📦"),
+            NavPage("views/5_Alquileres_y_alertas.py", "Alquileres", "💳"),
+        ],
+        "Finanzas e inventario": [
+            NavPage("views/7_Por_pagar.py", "Por pagar", "📤"),
+            NavPage("views/8_Por_cobrar.py", "Por cobrar", "📥"),
+            NavPage("views/9_Gastos_operativos.py", "Gastos", "🧾"),
+            NavPage("views/10_Inventario_telecom.py", "Inventario telecom", "📡"),
+        ],
+    }
+
+
+def _nav_tecnico() -> dict[str, list[NavPage]]:
+    return {
+        "Operación": [
+            NavPage("views/1_Dashboard.py", "Dashboard", "📊", default=True),
+            NavPage("views/4_Cuentas.py", "Cuentas", "📦"),
+        ],
+        "Recursos": [
+            NavPage("views/10_Inventario_telecom.py", "Inventario telecom", "📡"),
+        ],
+    }
+
+
+def get_nav_sections_for_role(role: str | None) -> dict[str, list[NavPage]]:
+    """Menú lateral según rol (coherente con require_roles en cada vista)."""
+    r = role or ROLE_TECNICO
+    if r in (ROLE_SUPER, ROLE_ADMIN):
+        return _nav_full()
+    if r == ROLE_VENDEDOR:
+        return _nav_vendedor()
+    return _nav_tecnico()
 
 
 def init_session_state():

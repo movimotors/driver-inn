@@ -7,7 +7,7 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
-from src.rbac import ROLE_LABELS, init_session_state, is_logged_in, logout
+from src.rbac import ROLE_LABELS, get_nav_sections_for_role, init_session_state, is_logged_in, logout
 from views.login_screen import render_auth_screen
 
 st.set_page_config(
@@ -33,26 +33,13 @@ with st.sidebar:
         st.rerun()
 
 try:
-    nav = st.navigation(
-        {
-            "Operación": [
-                st.Page("views/1_Dashboard.py", title="Dashboard", icon="📊", default=True),
-                st.Page("views/2_Clientes.py", title="Clientes", icon="👤"),
-                st.Page("views/3_Tecnicos.py", title="Técnicos", icon="🔧"),
-                st.Page("views/4_Cuentas.py", title="Cuentas", icon="📦"),
-                st.Page("views/5_Alquileres_y_alertas.py", title="Alquileres", icon="💳"),
-            ],
-            "Finanzas e inventario": [
-                st.Page("views/7_Por_pagar.py", title="Por pagar", icon="📤"),
-                st.Page("views/8_Por_cobrar.py", title="Por cobrar", icon="📥"),
-                st.Page("views/9_Gastos_operativos.py", title="Gastos", icon="🧾"),
-                st.Page("views/10_Inventario_telecom.py", title="Inventario telecom", icon="📡"),
-            ],
-            "Administración": [
-                st.Page("views/6_Admin_usuarios.py", title="Usuarios y roles", icon="⚙️"),
-            ],
-        }
-    )
+    _sections = get_nav_sections_for_role(st.session_state.user_role)
+    _nav_groups: dict[str, list] = {}
+    for _name, _pages in _sections.items():
+        _nav_groups[_name] = [
+            st.Page(pg.path, title=pg.title, icon=pg.icon, default=pg.default) for pg in _pages
+        ]
+    nav = st.navigation(_nav_groups)
 except TypeError as e:
     st.error(
         "Tu versión de Streamlit es antigua. Ejecutá: `pip install -U 'streamlit>=1.36'` "

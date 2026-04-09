@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.auth_api import AuthError, request_password_recovery, sign_in_with_password, sign_up
 from src.config import get_auth_redirect_url, supabase_configured
-from src.rbac import fetch_profile_for_user
+from src.rbac import SELF_SIGNUP_ROLE_OPTIONS, fetch_profile_for_user
 
 _LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo_driver_inn.png"
 
@@ -118,8 +118,18 @@ def render_auth_screen():
                     )
             if not supabase_configured():
                 st.warning("Configurá Secrets primero.")
+            st.caption(
+                "**Super usuario** y **Administración** no se eligen al registrarse: un administrador los asigna "
+                "en **Usuarios y roles**."
+            )
             with st.form("signup_form"):
                 su_name = st.text_input("Nombre visible")
+                su_role = st.selectbox(
+                    "Rol en la empresa",
+                    options=list(SELF_SIGNUP_ROLE_OPTIONS.keys()),
+                    format_func=lambda k: SELF_SIGNUP_ROLE_OPTIONS[k],
+                    help="Define qué módulos verás al entrar (el menú se adapta a este rol).",
+                )
                 su_email = st.text_input("Correo", key="su_email")
                 su_pw = st.text_input("Contraseña (mín. 6 caracteres)", type="password", key="su_pw")
                 su_pw2 = st.text_input("Repetir contraseña", type="password", key="su_pw2")
@@ -140,6 +150,7 @@ def render_auth_screen():
                             su_pw,
                             full_name=su_name.strip() or None,
                             redirect_to=_redir,
+                            signup_role=su_role,
                         )
                         st.success(
                             "Cuenta creada. Si hay confirmación por correo, abrí el enlace y luego **iniciá sesión** "

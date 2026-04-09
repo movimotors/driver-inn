@@ -32,11 +32,12 @@ update public.profiles set role = 'superusuario' where id = '<uuid del usuario>'
 1. **SQL Editor**: ejecutá [`supabase/schema.sql`](supabase/schema.sql).
 2. **SQL Editor**: ejecutá [`supabase/migration_002_auth_profiles_rls.sql`](supabase/migration_002_auth_profiles_rls.sql) (sustituye las políticas abiertas de desarrollo por RLS con JWT).
 3. **SQL Editor** (opcional): [`supabase/migration_003_finance_telecom.sql`](supabase/migration_003_finance_telecom.sql) — cuentas por pagar/cobrar, gastos operativos, inventario telecom (datos, números, proxies, líneas) + RLS + filas de ejemplo. Si la ejecutás de nuevo, los `INSERT` duplicarán datos: comentá o borrá la sección de ejemplo.
-4. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
-5. **Authentication → URL configuration**:
+4. **SQL Editor**: [`supabase/migration_004_signup_role.sql`](supabase/migration_004_signup_role.sql) — al registrarse, el rol **vendedor** o **técnico** elegido en la app se guarda en `profiles` (metadata `signup_role`). Sin esta migración, todos los registros quedan como técnico.
+5. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
+6. **Authentication → URL configuration**:
    - **Site URL**: en producción, ponelá la URL pública de Streamlit (`https://TU-APP.streamlit.app`), no `localhost`, si los usuarios confirman correo desde el celular u otro equipo.
    - **Redirect URLs**: añadí esa misma URL (y `http://localhost:8501` si probás en local). Aplica a **recuperación de contraseña** y a **confirmar registro por correo**.
-6. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
+7. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
 
 ## Configuración local
 
@@ -92,6 +93,7 @@ git push -u origin main
 | `supabase/schema.sql` | Tablas iniciales |
 | `supabase/migration_002_auth_profiles_rls.sql` | Perfiles, Auth trigger, RLS por rol |
 | `supabase/migration_003_finance_telecom.sql` | Finanzas + telecom, RLS, inserts de ejemplo |
+| `supabase/migration_004_signup_role.sql` | Rol al registrarse (vendedor/técnico) vía metadata |
 
 ## Próximos pasos sugeridos
 
