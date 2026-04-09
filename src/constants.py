@@ -53,8 +53,9 @@ SERVICE_MODALITY_HELP = {
         "**Datos terceros** es el inventario; la asignación a la cuenta se hace desde ahí."
     ),
     "cliente_licencia_sin_social": (
-        "El **cliente ya tiene licencia** pero **aún no tiene** número de seguro social (SSN) u otros datos sociales. "
-        "El flujo es distinto al de cuenta a nombre de tercero."
+        "El **cliente ya tiene licencia** pero **aún no tiene** SSN u otros datos sociales. "
+        "Se guarda un **registro aparte** con **foto(s) de la licencia** y el **precio de venta** cobrado. "
+        "No usa el inventario de datos de tercero."
     ),
     "cliente_licencia_social_activacion_cupo": (
         "El cliente **tiene licencia y SSN**; el trabajo es **activar** la cuenta cuando haya **cupo** en la plataforma."

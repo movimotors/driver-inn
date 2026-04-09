@@ -36,11 +36,12 @@ update public.profiles set role = 'superusuario' where id = '<uuid del usuario>'
 5. **SQL Editor**: [`supabase/migration_005_datos_terceros.sql`](supabase/migration_005_datos_terceros.sql) — **Datos terceros** (licencias): tablas `third_party_identities` y `account_identity_links`, bucket Storage **license-photos** y políticas. La pantalla **Inventario telecom** fue reemplazada por **Datos terceros** en la app.
 6. **SQL Editor**: [`supabase/migration_006_account_service_modality.sql`](supabase/migration_006_account_service_modality.sql) — columna **`service_modality`** en `accounts` (cuenta a nombre de tercero / licencia sin SSN / licencia + SSN y activación por cupo).
 7. **SQL Editor**: [`supabase/migration_007_third_party_workflow.sql`](supabase/migration_007_third_party_workflow.sql) — datos terceros: **cliente solicitud**, **técnico asignado**, **workflow** (Kanban), **semáforo** (incl. Background malo), trigger anti-vínculos si el dato está malo.
-8. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
-9. **Authentication → URL configuration**:
+8. **SQL Editor**: [`supabase/migration_008_account_solo_licencia.sql`](supabase/migration_008_account_solo_licencia.sql) — modalidad **solo licencia** (`cliente_licencia_sin_social`): tabla **`account_solo_licencia_records`** (foto(s) en Storage + **precio de venta** por cuenta).
+9. **Authentication → Providers**: habilitá **Email** (correo/contraseña).
+10. **Authentication → URL configuration**:
    - **Site URL**: en producción, ponelá la URL pública de Streamlit (`https://TU-APP.streamlit.app`), no `localhost`, si los usuarios confirman correo desde el celular u otro equipo.
    - **Redirect URLs**: añadí esa misma URL (y `http://localhost:8501` si probás en local). Aplica a **recuperación de contraseña** y a **confirmar registro por correo**.
-10. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
+11. **Settings → API**: copiá la **URL** y la clave **anon** (la app usa el JWT del usuario en cada petición; la anon key va en cabecera `apikey`).
 
 ## Configuración local
 
@@ -102,6 +103,7 @@ git push -u origin main
 | `supabase/migration_005_datos_terceros.sql` | Licencias / datos terceros + fotos (Storage) + vínculo a cuentas |
 | `supabase/migration_006_account_service_modality.sql` | Modalidad de servicio por cuenta (tercero / sin SSN / cupo) |
 | `supabase/migration_007_third_party_workflow.sql` | Datos terceros: cliente, técnico, Kanban, semáforo Background malo |
+| `supabase/migration_008_account_solo_licencia.sql` | Solo licencia: registro por cuenta (fotos + precio venta) |
 
 ## Próximos pasos sugeridos
 

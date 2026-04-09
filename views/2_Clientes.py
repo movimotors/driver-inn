@@ -15,8 +15,17 @@ from src.constants import (
     SERVICE_MODALITY_LABELS,
     SERVICE_MODALITY_ORDER,
 )
+from src.account_solo_licencia import (
+    SOLO_LICENCIA_MODALITY,
+    back_storage_path,
+    normalize_image_ext,
+    solo_table_available,
+    storage_paths_for_account,
+    upsert_solo_record,
+)
 from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_ADMIN, ROLE_SUPER, ROLE_VENDEDOR, require_roles
+from src.storage_api import storage_upload
 from src.tpi_account_linking import (
     TERCERO_MODALITY,
     apply_account_tercero_identity,
@@ -75,6 +84,7 @@ except Exception:
     techs, plats = [], []
     schema_has_service_modality = False
     tpi_rows, links_by_i = [], {}
+schema_has_solo_licencia = solo_table_available(sb)
 tpi_by_id = {str(r["id"]): r for r in tpi_rows}
 tid = {t["id"]: t["name"] for t in techs}
 pid = {p["id"]: p["name"] for p in plats}
@@ -145,6 +155,32 @@ with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", e
                 format_func=lambda x: dict(STATUS_OPTIONS)[x],
                 key="cl_na_st",
             )
+            with st.container(border=True):
+                st.markdown("##### Registro **solo licencia** (sin social / SSN)")
+                st.caption("Si la modalidad es **Cliente con licencia — sin social**: foto(s) y precio de venta.")
+                cl_na_sl_front = st.file_uploader(
+                    "Foto frente de la licencia",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key="cl_na_slf",
+                )
+                cl_na_sl_back = st.file_uploader(
+                    "Foto dorso (opcional)",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key="cl_na_slb",
+                )
+                cl_na_sl_price = st.number_input(
+                    "Precio de venta cobrado",
+                    min_value=0.0,
+                    value=0.0,
+                    step=10.0,
+                    key="cl_na_slp",
+                )
+                cl_na_sl_notes = st.text_area(
+                    "Notas del registro solo licencia",
+                    placeholder="Opcional",
+                    key="cl_na_sln",
+                    height=72,
+                )
             technician_id = st.selectbox(
                 "Técnico (opcional)",
                 options=[None] + [t["id"] for t in techs],
@@ -162,8 +198,16 @@ with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", e
 
             mod_key = SERVICE_MODALITY_ORDER[modality_ix] if schema_has_service_modality else None
             tpi_pick = st.session_state.get("cl_na_tpi")
+            solo_err = None
+            if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
+                if not cl_na_sl_front:
+                    solo_err = "Modalidad **solo licencia**: subí la **foto del frente** de la licencia."
+                elif sale_type == "venta" and (not cl_na_sl_price or cl_na_sl_price <= 0):
+                    solo_err = "Modalidad **solo licencia** en **Venta**: indicá el **precio cobrado** (> 0)."
             if schema_has_service_modality and mod_key == TERCERO_MODALITY and not tpi_pick:
                 st.error("Elegí una ficha **disponible** del inventario para modalidad a nombre de tercero.")
+            elif solo_err:
+                st.error(solo_err)
             else:
                 now = datetime.now(timezone.utc).isoformat()
                 payload = {
@@ -191,20 +235,48 @@ with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", e
                             if verr:
                                 sb.table("accounts").delete().eq("id", new_aid).execute()
                                 st.error(verr)
-                            else:
-                                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
-                                st.cache_data.clear()
-                                st.success("Cuenta creada y dato de tercero vinculado.")
-                                st.rerun()
+                                raise RuntimeError("rollback")
+                            apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
                         else:
                             apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
-                            st.cache_data.clear()
-                            st.success("Cuenta creada.")
-                            st.rerun()
-                    else:
-                        st.cache_data.clear()
-                        st.success("Cuenta creada.")
-                        st.rerun()
+                    if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
+                        ext_f = normalize_image_ext(cl_na_sl_front.name)
+                        fp, _ = storage_paths_for_account(new_aid, ext_f, None)
+                        storage_upload(
+                            token,
+                            fp,
+                            cl_na_sl_front.getvalue(),
+                            cl_na_sl_front.type or "image/jpeg",
+                        )
+                        back_path = None
+                        if cl_na_sl_back:
+                            ext_b = normalize_image_ext(cl_na_sl_back.name)
+                            back_path = back_storage_path(new_aid, ext_b)
+                            storage_upload(
+                                token,
+                                back_path,
+                                cl_na_sl_back.getvalue(),
+                                cl_na_sl_back.type or "image/jpeg",
+                            )
+                        upsert_solo_record(
+                            sb,
+                            new_aid,
+                            float(cl_na_sl_price),
+                            cl_na_sl_notes or None,
+                            fp,
+                            back_path,
+                        )
+                    st.cache_data.clear()
+                    msg = "Cuenta creada."
+                    if mod_key == TERCERO_MODALITY and tpi_pick:
+                        msg = "Cuenta creada y dato de tercero vinculado."
+                    elif mod_key == SOLO_LICENCIA_MODALITY:
+                        msg = "Cuenta creada con registro **solo licencia** (foto y precio)."
+                    st.success(msg)
+                    st.rerun()
+                except RuntimeError as re:
+                    if str(re) != "rollback":
+                        st.error(str(re))
                 except Exception as e:
                     st.error(f"No se pudo crear la cuenta: {e}")
 

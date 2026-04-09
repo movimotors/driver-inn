@@ -1,4 +1,5 @@
 import sys
+from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 
@@ -18,8 +19,21 @@ from src.constants import (
     SERVICE_MODALITY_LABELS,
     SERVICE_MODALITY_ORDER,
 )
+from src.account_solo_licencia import (
+    SOLO_LICENCIA_MODALITY,
+    back_storage_path,
+    delete_record,
+    fetch_solo_map,
+    front_storage_path,
+    normalize_image_ext,
+    remove_storage_files,
+    solo_table_available,
+    storage_paths_for_account,
+    upsert_solo_record,
+)
 from src.db import fetch_accounts_list_with_modality_fallback, get_client
 from src.rbac import ROLE_TECNICO, require_login
+from src.storage_api import storage_download, storage_upload
 from src.tpi_account_linking import (
     TERCERO_MODALITY,
     apply_account_tercero_identity,
@@ -93,11 +107,20 @@ except Exception:
     pass
 tpi_by_id = {str(r["id"]): r for r in tpi_rows}
 
+schema_has_solo_licencia = solo_table_available(sb)
+solo_map: dict = fetch_solo_map(sb) if schema_has_solo_licencia else {}
+
 if not schema_has_service_modality:
     st.warning(
         "La base **aún no tiene** la columna **service_modality** (modalidades de servicio). "
         "Ejecutá en Supabase SQL Editor: **`supabase/migration_006_account_service_modality.sql`**. "
         "Hasta entonces la app funciona en modo compatible, pero **no se guardará** la modalidad al crear/editar."
+    )
+
+if schema_has_service_modality and not schema_has_solo_licencia:
+    st.warning(
+        "Para **fotos y precio** en modalidad **solo licencia**, ejecutá en Supabase: "
+        "**`supabase/migration_008_account_solo_licencia.sql`**."
     )
 
 cid = {c["id"]: c["name"] for c in clients}
@@ -118,9 +141,20 @@ for row in accounts:
     badge = status_badge(row["status"])
     mod = row.get("service_modality") or "cuenta_nombre_tercero"
     mod_lbl = SERVICE_MODALITY_LABELS.get(mod, mod)
+    aid = str(row["id"])
+    sl_extra = ""
+    if (
+        schema_has_solo_licencia
+        and mod == SOLO_LICENCIA_MODALITY
+        and (solo_map.get(aid) or {}).get("photo_front_path")
+    ):
+        sl = solo_map[aid]
+        sl_extra = f" · **Solo licencia** · ${float(sl.get('sale_price', 0)):,.2f} · 📷 registro"
+    elif schema_has_solo_licencia and mod == SOLO_LICENCIA_MODALITY:
+        sl_extra = " · **Solo licencia** (sin registro / falta migración o datos)"
     st.markdown(
         f"**{plat}** · Cliente: {cli} · Técnico: {tech} · "
-        f"{SALE_TYPE_LABELS.get(row['sale_type'], row['sale_type'])} · *{mod_lbl}* — {badge}",
+        f"{SALE_TYPE_LABELS.get(row['sale_type'], row['sale_type'])} · *{mod_lbl}*{sl_extra} — {badge}",
         unsafe_allow_html=True,
     )
     if row.get("requirements_notes"):
@@ -173,6 +207,36 @@ if can_create:
             status = st.selectbox(
                 "Estado inicial", options=[x[0] for x in STATUS_OPTIONS], format_func=lambda x: dict(STATUS_OPTIONS)[x]
             )
+            with st.container(border=True):
+                st.markdown("##### Registro **solo licencia** (sin social / SSN)")
+                st.caption(
+                    "Si la modalidad es **Cliente con licencia — sin social**, se guarda un registro aparte con "
+                    "**foto(s)** y **precio de venta**. En otras modalidades esto no se usa."
+                )
+                na_sl_front = st.file_uploader(
+                    "Foto frente de la licencia",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key="na_slf",
+                )
+                na_sl_back = st.file_uploader(
+                    "Foto dorso (opcional)",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key="na_slb",
+                )
+                na_sl_price = st.number_input(
+                    "Precio de venta cobrado",
+                    min_value=0.0,
+                    value=0.0,
+                    step=10.0,
+                    key="na_slp",
+                    help="Con tipo **Venta** debe ser mayor a 0.",
+                )
+                na_sl_notes = st.text_area(
+                    "Notas del registro solo licencia",
+                    placeholder="Opcional",
+                    key="na_sln",
+                    height=72,
+                )
             technician_id = st.selectbox(
                 "Técnico (opcional)",
                 options=[None] + [t["id"] for t in techs],
@@ -188,8 +252,16 @@ if can_create:
             now = datetime.now(timezone.utc).isoformat()
             mod_key = SERVICE_MODALITY_ORDER[modality_ix] if schema_has_service_modality else None
             na_tpi_pick = st.session_state.get("na_tpi")
+            solo_err = None
+            if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
+                if not na_sl_front:
+                    solo_err = "Modalidad **solo licencia**: subí la **foto del frente** de la licencia del cliente."
+                elif sale_type == "venta" and (not na_sl_price or na_sl_price <= 0):
+                    solo_err = "Modalidad **solo licencia** con tipo **Venta**: indicá el **precio cobrado** (mayor a 0)."
             if schema_has_service_modality and mod_key == TERCERO_MODALITY and not na_tpi_pick:
                 st.error("Con modalidad **Cuenta a nombre de tercero** tenés que elegir una ficha del inventario (disponible).")
+            elif solo_err:
+                st.error(solo_err)
             else:
                 payload = {
                     "client_id": client_id,
@@ -216,20 +288,48 @@ if can_create:
                             if verr:
                                 sb.table("accounts").delete().eq("id", new_aid).execute()
                                 st.error(verr)
-                            else:
-                                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
-                                st.cache_data.clear()
-                                st.success("Cuenta creada y dato de tercero vinculado.")
-                                st.rerun()
+                                raise RuntimeError("rollback")
+                            apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
                         else:
                             apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
-                            st.cache_data.clear()
-                            st.success("Cuenta creada.")
-                            st.rerun()
-                    else:
-                        st.cache_data.clear()
-                        st.success("Cuenta creada.")
-                        st.rerun()
+                    if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
+                        ext_f = normalize_image_ext(na_sl_front.name)
+                        fp, bp_opt = storage_paths_for_account(new_aid, ext_f, None)
+                        storage_upload(
+                            token,
+                            fp,
+                            na_sl_front.getvalue(),
+                            na_sl_front.type or "image/jpeg",
+                        )
+                        back_path = None
+                        if na_sl_back:
+                            ext_b = normalize_image_ext(na_sl_back.name)
+                            back_path = back_storage_path(new_aid, ext_b)
+                            storage_upload(
+                                token,
+                                back_path,
+                                na_sl_back.getvalue(),
+                                na_sl_back.type or "image/jpeg",
+                            )
+                        upsert_solo_record(
+                            sb,
+                            new_aid,
+                            float(na_sl_price),
+                            na_sl_notes or None,
+                            fp,
+                            back_path,
+                        )
+                    st.cache_data.clear()
+                    msg = "Cuenta creada."
+                    if mod_key == TERCERO_MODALITY and na_tpi_pick:
+                        msg = "Cuenta creada y dato de tercero vinculado."
+                    elif mod_key == SOLO_LICENCIA_MODALITY:
+                        msg = "Cuenta creada con registro **solo licencia** (foto y precio)."
+                    st.success(msg)
+                    st.rerun()
+                except RuntimeError as re:
+                    if str(re) != "rollback":
+                        st.error(str(re))
                 except Exception as e:
                     st.error(f"No se pudo crear: {e}")
 else:
@@ -248,6 +348,31 @@ else:
 
     acc = st.selectbox("Seleccionar cuenta", options=[a["id"] for a in accounts], format_func=_acc_label)
     current = next(a for a in accounts if a["id"] == acc)
+    existing_sl = solo_map.get(acc) if schema_has_solo_licencia else None
+    if existing_sl and existing_sl.get("photo_front_path"):
+        with st.expander("Registro solo licencia · fotos actuales", expanded=False):
+            st.markdown(f"**Precio de venta registrado:** ${float(existing_sl.get('sale_price') or 0):,.2f}")
+            if existing_sl.get("notes"):
+                st.caption(existing_sl["notes"])
+            c1, c2 = st.columns(2)
+            with c1:
+                try:
+                    st.image(
+                        BytesIO(storage_download(token, existing_sl["photo_front_path"])),
+                        caption="Frente",
+                        use_container_width=True,
+                    )
+                except Exception:
+                    st.caption("No se pudo mostrar el frente.")
+            with c2:
+                pb = existing_sl.get("photo_back_path")
+                if pb:
+                    try:
+                        st.image(BytesIO(storage_download(token, pb)), caption="Dorso", use_container_width=True)
+                    except Exception:
+                        st.caption("No se pudo mostrar el dorso.")
+                else:
+                    st.caption("Sin foto de dorso.")
     tech_options: list = [None] + [t["id"] for t in techs]
     try:
         tech_index = tech_options.index(current.get("technician_id"))
@@ -318,6 +443,41 @@ else:
         set_rental_due = st.checkbox("Fijar próximo vencimiento de alquiler")
         rental_due = st.date_input("Próximo vencimiento alquiler", value=None) if set_rental_due else None
         note_event = st.text_input("Nota del cambio (auditoría)")
+        show_sl = schema_has_solo_licencia and (
+            cur_mod == SOLO_LICENCIA_MODALITY
+            or SERVICE_MODALITY_ORDER[new_modality_ix] == SOLO_LICENCIA_MODALITY
+        )
+        ua_sl_price = float((existing_sl or {}).get("sale_price") or 0)
+        ua_sl_notes = (existing_sl or {}).get("notes") or ""
+        ua_sl_f = None
+        ua_sl_b = None
+        if show_sl:
+            with st.container(border=True):
+                st.markdown("##### Registro **solo licencia**")
+                ua_sl_price = st.number_input(
+                    "Precio de venta cobrado",
+                    min_value=0.0,
+                    value=ua_sl_price,
+                    step=10.0,
+                    key=f"ua_slp_{acc}",
+                    help="Si la cuenta es tipo **Venta**, debe ser mayor a 0.",
+                )
+                ua_sl_notes = st.text_area(
+                    "Notas del registro",
+                    value=ua_sl_notes,
+                    key=f"ua_sln_{acc}",
+                    height=72,
+                )
+                ua_sl_f = st.file_uploader(
+                    "Reemplazar foto frente (opcional si ya hay una arriba)",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=f"ua_slf_{acc}",
+                )
+                ua_sl_b = st.file_uploader(
+                    "Reemplazar o agregar dorso",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=f"ua_slb_{acc}",
+                )
         save = st.form_submit_button("Guardar cambios")
     if save:
         old_st = current["status"]
@@ -339,6 +499,13 @@ else:
             if verr:
                 st.error(verr)
                 block = True
+        if schema_has_solo_licencia and new_mod == SOLO_LICENCIA_MODALITY:
+            if not ua_sl_f and not (existing_sl or {}).get("photo_front_path"):
+                st.error("Modalidad **solo licencia**: subí la **foto del frente** o conservá la ya registrada.")
+                block = True
+            elif current["sale_type"] == "venta" and ua_sl_price <= 0:
+                st.error("Con tipo **Venta** indicá el **precio cobrado** (> 0) en el registro solo licencia.")
+                block = True
         if not block:
             upd = {"status": new_status, "technician_id": new_tech}
             if schema_has_service_modality:
@@ -355,6 +522,40 @@ else:
                 sb.table("accounts").update(upd).eq("id", acc).execute()
                 if schema_has_service_modality:
                     apply_account_tercero_identity(sb, acc, new_mod, link_id)
+                if schema_has_solo_licencia:
+                    if new_mod != SOLO_LICENCIA_MODALITY:
+                        if acc in solo_map:
+                            remove_storage_files(token, solo_map[acc])
+                            delete_record(sb, acc)
+                    else:
+                        fp = (existing_sl or {}).get("photo_front_path")
+                        bp = (existing_sl or {}).get("photo_back_path")
+                        if ua_sl_f:
+                            ext = normalize_image_ext(ua_sl_f.name)
+                            fp = front_storage_path(acc, ext)
+                            storage_upload(
+                                token,
+                                fp,
+                                ua_sl_f.getvalue(),
+                                ua_sl_f.type or "image/jpeg",
+                            )
+                        if ua_sl_b:
+                            ext_b = normalize_image_ext(ua_sl_b.name)
+                            bp = back_storage_path(acc, ext_b)
+                            storage_upload(
+                                token,
+                                bp,
+                                ua_sl_b.getvalue(),
+                                ua_sl_b.type or "image/jpeg",
+                            )
+                        upsert_solo_record(
+                            sb,
+                            acc,
+                            float(ua_sl_price),
+                            ua_sl_notes or None,
+                            fp,
+                            bp,
+                        )
                 if old_st != new_status:
                     sb.table("account_status_events").insert(
                         {
