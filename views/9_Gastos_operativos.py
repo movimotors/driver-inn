@@ -12,7 +12,6 @@ from src.config import supabase_configured
 from src.db import get_client
 from src.rbac import FINANCE_ROLES, can_delete_finance_records, require_roles
 
-st.set_page_config(page_title="Gastos operativos", layout="wide")
 st.title("Gastos operativos")
 
 if not supabase_configured():

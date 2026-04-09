@@ -13,7 +13,6 @@ from src.config import supabase_configured
 from src.db import get_client
 from src.rbac import can_edit_telecom_inventory, require_login
 
-st.set_page_config(page_title="Inventario telecom", layout="wide")
 st.title("Inventario telecom y números (EE. UU.)")
 
 if not supabase_configured():

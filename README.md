@@ -52,7 +52,7 @@ Abre el navegador en la URL que muestre Streamlit (por defecto `http://localhost
 
 ## Streamlit Cloud (Secrets)
 
-1. En el deploy, **Main file path** debe ser **`Home.py`** (si ponés solo una página de `pages/`, no verás el login en la raíz).
+1. En el deploy, **Main file path** debe ser **`Home.py`**. La app usa **`st.navigation`** (Streamlit **≥ 1.36**): primero solo ves **login/registro**; el menú lateral de la app aparece después de autenticarte. Las pantallas viven en **`views/`** (ya no se usa la carpeta `pages/` automática).
 2. **App settings → Secrets**, pegá por ejemplo:
 
 ```toml
@@ -80,8 +80,9 @@ git push -u origin main
 
 | Ruta | Descripción |
 |------|-------------|
-| `Home.py` | Login, recuperación de contraseña, bienvenida |
-| `pages/` | Dashboard, clientes, técnicos, cuentas, alquileres, admin usuarios |
+| `Home.py` | Entrada: login exclusivo si no hay sesión; luego `st.navigation` |
+| `views/login_screen.py` | Formularios de acceso (sesión, registro, recuperar contraseña) |
+| `views/*.py` | Dashboard, clientes, finanzas, inventario, admin (solo con sesión) |
 | `src/` | Config, cliente REST, auth HTTP, roles |
 | `supabase/schema.sql` | Tablas iniciales |
 | `supabase/migration_002_auth_profiles_rls.sql` | Perfiles, Auth trigger, RLS por rol |

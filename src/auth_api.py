@@ -41,6 +41,25 @@ def sign_in_with_password(email: str, password: str) -> dict[str, Any]:
     return r.json()
 
 
+def sign_up(email: str, password: str, full_name: str | None = None) -> dict[str, Any]:
+    """Registro vía Supabase Auth (el trigger crea la fila en public.profiles)."""
+    url, _ = get_supabase_config()
+    endpoint = f"{url.rstrip('/')}/auth/v1/signup"
+    body: dict[str, Any] = {"email": email.strip(), "password": password}
+    if full_name:
+        body["data"] = {"full_name": full_name}
+    with httpx.Client(timeout=30.0) as client:
+        r = client.post(endpoint, headers=_auth_headers(), json=body)
+    if r.status_code not in (200, 201):
+        try:
+            j = r.json()
+            detail = j.get("error_description") or j.get("msg") or j.get("message") or r.text
+        except Exception:
+            detail = r.text
+        raise AuthError(str(detail) or "No se pudo registrar.", r.status_code)
+    return r.json()
+
+
 def request_password_recovery(email: str, redirect_to: str | None = None) -> None:
     url, _ = get_supabase_config()
     endpoint = f"{url.rstrip('/')}/auth/v1/recover"

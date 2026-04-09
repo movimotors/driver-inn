@@ -13,7 +13,6 @@ from src.constants import ACCOUNT_STATUS_COLOR, ACCOUNT_STATUS_LABELS, ACCOUNT_S
 from src.db import get_client
 from src.rbac import ROLE_TECNICO, require_login
 
-st.set_page_config(page_title="Cuentas", layout="wide")
 st.title("Cuentas delivery — semáforo de estado")
 
 if not supabase_configured():

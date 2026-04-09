@@ -14,7 +14,6 @@ from src.constants import ACCOUNT_STATUS_LABELS, SALE_TYPE_LABELS
 from src.db import get_client
 from src.rbac import require_login
 
-st.set_page_config(page_title="Dashboard", layout="wide")
 st.title("Resumen gerencial")
 
 if not supabase_configured():

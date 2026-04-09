@@ -13,7 +13,6 @@ from src.config import supabase_configured
 from src.db import get_client
 from src.rbac import ROLE_ADMIN, ROLE_SUPER, ROLE_VENDEDOR, require_roles
 
-st.set_page_config(page_title="Alquileres", layout="wide")
 st.title("Alquileres, pagos y alertas")
 
 if not supabase_configured():

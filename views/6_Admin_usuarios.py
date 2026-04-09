@@ -10,7 +10,6 @@ import streamlit as st
 from src.db import get_client
 from src.rbac import ALL_ROLES, ROLE_LABELS, ROLE_ADMIN, ROLE_SUPER, require_roles
 
-st.set_page_config(page_title="Admin usuarios", layout="wide")
 st.title("Administración de usuarios y roles")
 
 require_roles([ROLE_SUPER, ROLE_ADMIN])
