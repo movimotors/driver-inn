@@ -49,6 +49,13 @@ PLATFORM_FIELDS = [
 ]
 
 
+def _card_start(title: str, hint: str | None = None) -> None:
+    """Encabezado dentro de un contenedor con borde (tarjeta)."""
+    st.markdown(f"##### {title}")
+    if hint:
+        st.caption(hint)
+
+
 def _platform_labels_row(row: dict) -> str:
     parts = [lbl for key, lbl in PLATFORM_FIELDS if row.get(key)]
     return ", ".join(parts) if parts else "—"
@@ -95,14 +102,15 @@ def load_account_choices(_token: str):
 
 def _show_license_photo(label: str, path: str | None):
     if not path:
-        st.caption(f"{label}: sin archivo")
+        st.caption("Sin archivo cargado." if not label else f"{label}: sin archivo")
         return
     try:
         data = storage_download(token, path)
-        st.caption(label)
+        if label:
+            st.caption(label)
         st.image(BytesIO(data), use_container_width=True)
     except Exception as e:
-        st.warning(f"{label}: no se pudo mostrar ({e})")
+        st.warning(f"{label + ': ' if label else ''}No se pudo mostrar ({e})")
 
 
 def _sync_links(identity_id: str, account_ids: list):
@@ -192,11 +200,13 @@ for r in rows:
         }
     )
 st.subheader("Listado")
-st.dataframe(
-    [{k: v for k, v in s.items() if k != "_id"} for s in summary],
-    use_container_width=True,
-    hide_index=True,
-)
+with st.container(border=True):
+    st.caption("Vista rápida de todas las licencias registradas.")
+    st.dataframe(
+        [{k: v for k, v in s.items() if k != "_id"} for s in summary],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 # --- Detalle: fotos y cuentas ---
 st.subheader("Detalle y fotos")
@@ -205,53 +215,98 @@ if not rows:
 else:
     by_id = {str(r["id"]): r for r in rows}
     pick = st.selectbox(
-        "Ver registro",
+        "Elegí un registro para ver fotos y cuentas",
         options=list(by_id.keys()),
         format_func=lambda i: f"{by_id[i].get('first_name')} {by_id[i].get('last_name')} — {by_id[i].get('license_number')}",
     )
     cur = by_id[pick]
-    c1, c2 = st.columns(2)
-    with c1:
-        _show_license_photo("Frente", cur.get("photo_front_path"))
-    with c2:
-        _show_license_photo("Dorso", cur.get("photo_back_path"))
-    st.markdown("**Cuentas asignadas**")
-    la = links_map.get(pick, [])
-    if la:
-        for a in la:
-            st.write(f"- {acct_label.get(a, a)}")
-    else:
-        st.caption("Ninguna cuenta vinculada.")
+    ph1, ph2 = st.columns(2)
+    with ph1:
+        with st.container(border=True):
+            _card_start("📷 Frente de la licencia")
+            _show_license_photo("", cur.get("photo_front_path"))
+    with ph2:
+        with st.container(border=True):
+            _card_start("📷 Dorso de la licencia")
+            _show_license_photo("", cur.get("photo_back_path"))
+    with st.container(border=True):
+        _card_start("🔗 Cuentas delivery vinculadas", "Donde se usa esta identidad.")
+        la = links_map.get(pick, [])
+        if la:
+            for a in la:
+                st.write(f"· {acct_label.get(a, a)}")
+        else:
+            st.caption("Ninguna cuenta vinculada todavía.")
 
 # --- Alta ---
 if edit_ok:
-    with st.expander("Alta de licencia / datos terceros", expanded=not rows):
+    with st.expander("➕ Nueva licencia / datos terceros", expanded=not rows):
         with st.form("new_id"):
-            n_fn = st.text_input("Nombre *")
-            n_ln = st.text_input("Apellido *")
-            n_addr = st.text_area("Dirección")
-            n_lic = st.text_input("Número de licencia *")
-            n_st = st.selectbox("Estado de la licencia", options=STATUS_KEYS, format_func=lambda x: STATUS_LABEL[x])
-            n_iss_st = st.text_input("Estado emisor (EE. UU., ej. FL, TX)", max_chars=4)
-            n_dob = st.date_input("Fecha de nacimiento", value=None)
-            n_iss_d = st.date_input("Fecha de emisión", value=None)
-            n_exp = st.date_input("Fecha de expiración *", value=date.today())
-            st.markdown("**Uso previsto en plataformas**")
-            plat_vals = {}
-            cols = st.columns(4)
-            for i, (field, lbl) in enumerate(PLATFORM_FIELDS):
-                with cols[i % 4]:
-                    plat_vals[field] = st.checkbox(lbl, key=f"n_{field}")
-            st.markdown("**Fotos** (JPEG / PNG / WebP, máx. recomendado 5 MB c/u)")
-            up_f = st.file_uploader("Frente", type=["jpg", "jpeg", "png", "webp"], key="nf")
-            up_b = st.file_uploader("Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
-            n_accounts = st.multiselect(
-                "Cuentas donde se asignará",
-                options=acct_ids,
-                format_func=lambda x: acct_label.get(x, str(x)),
-            )
-            n_notes = st.text_area("Notas")
-            sub = st.form_submit_button("Guardar", type="primary")
+            with st.container(border=True):
+                _card_start("1 · Datos de la persona", "Como figuran en el documento o licencia.")
+                c_a, c_b = st.columns(2)
+                with c_a:
+                    n_fn = st.text_input("Nombre *", placeholder="Ej. María")
+                with c_b:
+                    n_ln = st.text_input("Apellido *", placeholder="Ej. García")
+                n_addr = st.text_area("Dirección completa", placeholder="Calle, ciudad, estado, ZIP…", height=88)
+                n_dob = st.date_input("Fecha de nacimiento (opcional)", value=None)
+
+            with st.container(border=True):
+                _card_start("2 · Datos de la licencia", "Número, estado de validez y fechas.")
+                n_lic = st.text_input("Número de licencia *", placeholder="Según el plástico")
+                r1, r2 = st.columns(2)
+                with r1:
+                    n_st = st.selectbox(
+                        "Estado de la licencia",
+                        options=STATUS_KEYS,
+                        format_func=lambda x: STATUS_LABEL[x],
+                        help="Vigente, vencida, en trámite, etc.",
+                    )
+                with r2:
+                    n_iss_st = st.text_input(
+                        "Estado emisor (EE. UU.)",
+                        max_chars=4,
+                        placeholder="FL, TX, CA…",
+                        help="Abreviatura del estado que emitió la licencia.",
+                    )
+                d1, d2, d3 = st.columns(3)
+                with d1:
+                    n_iss_d = st.date_input("Fecha de emisión (opcional)", value=None)
+                with d2:
+                    n_exp = st.date_input("Fecha de expiración *", value=date.today())
+                with d3:
+                    st.caption("Revisá que la fecha de vencimiento coincida con la foto.")
+
+            with st.container(border=True):
+                _card_start("3 · Plataformas", "Marcá en cuáles se va a usar esta identidad.")
+                plat_vals = {}
+                p_row1 = st.columns(4)
+                p_row2 = st.columns(4)
+                for i, (field, lbl) in enumerate(PLATFORM_FIELDS):
+                    box = p_row1[i] if i < 4 else p_row2[i - 4]
+                    with box:
+                        plat_vals[field] = st.checkbox(lbl, key=f"n_{field}")
+
+            with st.container(border=True):
+                _card_start("4 · Fotos de la licencia", "JPEG, PNG o WebP. Hasta ~5 MB por archivo.")
+                f1, f2 = st.columns(2)
+                with f1:
+                    up_f = st.file_uploader("Frente", type=["jpg", "jpeg", "png", "webp"], key="nf")
+                with f2:
+                    up_b = st.file_uploader("Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
+
+            with st.container(border=True):
+                _card_start("5 · Cuentas y notas", "Vinculá las cuentas delivery donde aplicará esta licencia.")
+                n_accounts = st.multiselect(
+                    "Cuentas donde se asignará",
+                    options=acct_ids,
+                    format_func=lambda x: acct_label.get(x, str(x)),
+                    placeholder="Buscá por cliente o plataforma…",
+                )
+                n_notes = st.text_area("Notas internas (opcional)", placeholder="Observaciones solo para el equipo…", height=100)
+
+            sub = st.form_submit_button("Guardar registro", type="primary", use_container_width=True)
         if sub:
             if not n_fn.strip() or not n_ln.strip() or not n_lic.strip():
                 st.error("Nombre, apellido y número de licencia son obligatorios.")
@@ -298,10 +353,10 @@ if edit_ok:
 
 # --- Edición / baja ---
 if edit_ok and rows:
-    with st.expander("Editar o eliminar registro"):
+    with st.expander("✏️ Editar o eliminar registro"):
         by_id = {str(r["id"]): r for r in rows}
         e_pick = st.selectbox(
-            "Registro",
+            "Registro a modificar",
             options=list(by_id.keys()),
             format_func=lambda i: f"{by_id[i].get('first_name')} {by_id[i].get('last_name')} — {by_id[i].get('license_number')}",
             key="edit_pick",
@@ -312,54 +367,81 @@ if edit_ok and rows:
         except ValueError:
             st_ix = 0
         with st.form("upd_id"):
-            u_fn = st.text_input("Nombre", value=cur.get("first_name") or "")
-            u_ln = st.text_input("Apellido", value=cur.get("last_name") or "")
-            u_addr = st.text_area("Dirección", value=cur.get("address_line") or "")
-            u_lic = st.text_input("Número de licencia", value=cur.get("license_number") or "")
-            u_st = st.selectbox(
-                "Estado de la licencia",
-                options=STATUS_KEYS,
-                format_func=lambda x: STATUS_LABEL[x],
-                index=st_ix,
-            )
-            u_iss_st = st.text_input(
-                "Estado emisor (EE. UU.)",
-                value=cur.get("license_issuing_state") or "",
-                max_chars=4,
-            )
-            dob = cur.get("date_of_birth")
-            isd = cur.get("license_issued_date")
-            exp = cur.get("license_expiry_date")
-            u_dob = st.date_input(
-                "Fecha de nacimiento",
-                value=date.fromisoformat(str(dob)[:10]) if dob else None,
-            )
-            u_isd = st.date_input(
-                "Fecha de emisión",
-                value=date.fromisoformat(str(isd)[:10]) if isd else None,
-            )
-            u_exp = st.date_input(
-                "Fecha de expiración",
-                value=date.fromisoformat(str(exp)[:10]) if exp else date.today(),
-            )
-            st.markdown("**Plataformas**")
-            u_plat = {}
-            cols = st.columns(4)
-            for i, (field, lbl) in enumerate(PLATFORM_FIELDS):
-                with cols[i % 4]:
-                    u_plat[field] = st.checkbox(lbl, value=bool(cur.get(field)), key=f"u_{e_pick}_{field}")
-            st.markdown("**Reemplazar fotos** (opcional)")
-            u_f = st.file_uploader("Nuevo frente", type=["jpg", "jpeg", "png", "webp"], key="uf")
-            u_b = st.file_uploader("Nuevo dorso", type=["jpg", "jpeg", "png", "webp"], key="ub")
-            linked = links_map.get(e_pick, [])
-            u_accounts = st.multiselect(
-                "Cuentas asignadas",
-                options=acct_ids,
-                default=[x for x in linked if x in acct_ids],
-                format_func=lambda x: acct_label.get(x, str(x)),
-            )
-            u_notes = st.text_area("Notas", value=cur.get("notes") or "")
-            save = st.form_submit_button("Guardar cambios")
+            with st.container(border=True):
+                _card_start("1 · Datos de la persona")
+                uc1, uc2 = st.columns(2)
+                with uc1:
+                    u_fn = st.text_input("Nombre", value=cur.get("first_name") or "")
+                with uc2:
+                    u_ln = st.text_input("Apellido", value=cur.get("last_name") or "")
+                u_addr = st.text_area("Dirección completa", value=cur.get("address_line") or "", height=88)
+                dob = cur.get("date_of_birth")
+                u_dob = st.date_input(
+                    "Fecha de nacimiento",
+                    value=date.fromisoformat(str(dob)[:10]) if dob else None,
+                )
+
+            with st.container(border=True):
+                _card_start("2 · Datos de la licencia")
+                u_lic = st.text_input("Número de licencia", value=cur.get("license_number") or "")
+                ur1, ur2 = st.columns(2)
+                with ur1:
+                    u_st = st.selectbox(
+                        "Estado de la licencia",
+                        options=STATUS_KEYS,
+                        format_func=lambda x: STATUS_LABEL[x],
+                        index=st_ix,
+                    )
+                with ur2:
+                    u_iss_st = st.text_input(
+                        "Estado emisor (EE. UU.)",
+                        value=cur.get("license_issuing_state") or "",
+                        max_chars=4,
+                    )
+                isd = cur.get("license_issued_date")
+                exp = cur.get("license_expiry_date")
+                ud1, ud2 = st.columns(2)
+                with ud1:
+                    u_isd = st.date_input(
+                        "Fecha de emisión",
+                        value=date.fromisoformat(str(isd)[:10]) if isd else None,
+                    )
+                with ud2:
+                    u_exp = st.date_input(
+                        "Fecha de expiración",
+                        value=date.fromisoformat(str(exp)[:10]) if exp else date.today(),
+                    )
+
+            with st.container(border=True):
+                _card_start("3 · Plataformas")
+                u_plat = {}
+                u_row1 = st.columns(4)
+                u_row2 = st.columns(4)
+                for i, (field, lbl) in enumerate(PLATFORM_FIELDS):
+                    ubox = u_row1[i] if i < 4 else u_row2[i - 4]
+                    with ubox:
+                        u_plat[field] = st.checkbox(lbl, value=bool(cur.get(field)), key=f"u_{e_pick}_{field}")
+
+            with st.container(border=True):
+                _card_start("4 · Fotos (reemplazo opcional)", "Si subís un archivo nuevo, reemplaza la imagen anterior.")
+                uf1, uf2 = st.columns(2)
+                with uf1:
+                    u_f = st.file_uploader("Nuevo frente", type=["jpg", "jpeg", "png", "webp"], key="uf")
+                with uf2:
+                    u_b = st.file_uploader("Nuevo dorso", type=["jpg", "jpeg", "png", "webp"], key="ub")
+
+            with st.container(border=True):
+                _card_start("5 · Cuentas y notas")
+                linked = links_map.get(e_pick, [])
+                u_accounts = st.multiselect(
+                    "Cuentas asignadas",
+                    options=acct_ids,
+                    default=[x for x in linked if x in acct_ids],
+                    format_func=lambda x: acct_label.get(x, str(x)),
+                )
+                u_notes = st.text_area("Notas internas", value=cur.get("notes") or "", height=100)
+
+            save = st.form_submit_button("Guardar cambios", type="primary", use_container_width=True)
         if save:
             if not u_fn.strip() or not u_ln.strip() or not u_lic.strip():
                 st.error("Nombre, apellido y número de licencia son obligatorios.")
