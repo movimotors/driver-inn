@@ -35,7 +35,8 @@ sb = get_client(token)
 
 def _clients_support_default_modality(_sb) -> bool:
     try:
-        _sb.table("clients").select("default_service_modality").limit(1).execute()
+        # Nuestro cliente REST no soporta limit(); basta con intentar seleccionar la columna.
+        _sb.table("clients").select("default_service_modality").execute()
         return True
     except httpx.HTTPStatusError as e:
         # PostgREST 400: columna no existe
