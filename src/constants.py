@@ -62,6 +62,14 @@ SERVICE_MODALITY_HELP = {
     ),
 }
 
+# --- Ejecución técnica (cuenta) ---
+ACCOUNT_PHONE_SOURCE_ORDER = ["cliente", "comprado_web", "otro"]
+ACCOUNT_PHONE_SOURCE_LABELS = {
+    "cliente": "Teléfono propio del cliente",
+    "comprado_web": "Teléfono comprado por la web",
+    "otro": "Otro / no definido",
+}
+
 # --- Datos terceros: semáforo de calidad del dato ---
 TPI_DATA_SEMAPHORE_ORDER = ["apto", "revisar", "background_malo"]
 

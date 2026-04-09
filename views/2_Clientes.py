@@ -75,6 +75,7 @@ rows = list_clients(token)
 st.dataframe(rows, use_container_width=True, hide_index=True)
 
 cid = {c["id"]: c.get("name") for c in rows}
+client_default_mod = {str(c["id"]): c.get("default_service_modality") for c in rows if c.get("id")}
 
 try:
     techs, plats = load_techs_plats(token)
@@ -112,6 +113,11 @@ with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", e
                 format_func=lambda x: pid.get(x, str(x)),
                 key="cl_na_p",
             )
+            default_mod = client_default_mod.get(str(pre_client)) or "cuenta_nombre_tercero"
+            try:
+                default_ix = SERVICE_MODALITY_ORDER.index(default_mod)
+            except ValueError:
+                default_ix = 0
             modality_ix = st.selectbox(
                 "Modalidad de servicio",
                 options=list(range(len(SERVICE_MODALITY_ORDER))),
@@ -119,6 +125,7 @@ with st.expander("Nueva cuenta delivery (cliente + inventario datos tercero)", e
                 help="Para tercero, el inventario está en **Datos terceros**; la vinculación es aquí.",
                 disabled=not schema_has_service_modality,
                 key="cl_na_mod",
+                index=default_ix,
             )
             if schema_has_service_modality:
                 st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
@@ -286,14 +293,60 @@ with st.expander("Nuevo cliente"):
         email = st.text_input("Email")
         phone = st.text_input("Teléfono")
         notes = st.text_area("Notas")
+        default_mod_ix = st.selectbox(
+            "Modalidad por defecto del cliente",
+            options=list(range(len(SERVICE_MODALITY_ORDER))),
+            format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
+            index=0,
+            help="Se sugerirá automáticamente al crear cuentas para este cliente.",
+            key="cl_def_mod",
+        )
         submitted = st.form_submit_button("Guardar")
     if submitted:
         if not name.strip():
             st.warning("El nombre es obligatorio.")
         else:
             sb.table("clients").insert(
-                {"name": name.strip(), "email": email or None, "phone": phone or None, "notes": notes or None}
+                {
+                    "name": name.strip(),
+                    "email": email or None,
+                    "phone": phone or None,
+                    "notes": notes or None,
+                    "default_service_modality": SERVICE_MODALITY_ORDER[default_mod_ix],
+                }
             ).execute()
             st.cache_data.clear()
             st.success("Cliente creado.")
             st.rerun()
+
+with st.expander("✏️ Editar modalidad por defecto del cliente", expanded=False):
+    if not rows:
+        st.info("Crea al menos un cliente primero.")
+    else:
+        pick = st.selectbox(
+            "Cliente",
+            options=[c["id"] for c in rows],
+            format_func=lambda x: cid.get(x, str(x)),
+            key="cl_edit_pick",
+        )
+        cur_mod = client_default_mod.get(str(pick)) or "cuenta_nombre_tercero"
+        try:
+            cur_ix = SERVICE_MODALITY_ORDER.index(cur_mod)
+        except ValueError:
+            cur_ix = 0
+        with st.form("cl_edit_default_mod"):
+            new_ix = st.selectbox(
+                "Modalidad por defecto",
+                options=list(range(len(SERVICE_MODALITY_ORDER))),
+                format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
+                index=cur_ix,
+            )
+            save = st.form_submit_button("Guardar")
+        if save:
+            try:
+                sb.table("clients").update({"default_service_modality": SERVICE_MODALITY_ORDER[new_ix]}).eq("id", pick).execute()
+                st.cache_data.clear()
+                st.success("Actualizado.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo actualizar: {e}")

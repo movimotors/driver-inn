@@ -14,6 +14,8 @@ from src.constants import (
     ACCOUNT_STATUS_COLOR,
     ACCOUNT_STATUS_LABELS,
     ACCOUNT_STATUS_ORDER,
+    ACCOUNT_PHONE_SOURCE_LABELS,
+    ACCOUNT_PHONE_SOURCE_ORDER,
     SALE_TYPE_LABELS,
     SERVICE_MODALITY_HELP,
     SERVICE_MODALITY_LABELS,
@@ -70,7 +72,12 @@ can_create = st.session_state.user_role != ROLE_TECNICO
 @st.cache_data(ttl=30)
 def load_lookups(_token: str):
     c = get_client(_token)
-    clients = (c.table("clients").select("id,name").order("name").execute().data) or []
+    try:
+        clients = (c.table("clients").select("id,name,default_service_modality").order("name").execute().data) or []
+    except Exception:
+        clients = (c.table("clients").select("id,name").order("name").execute().data) or []
+        for row in clients:
+            row["default_service_modality"] = "cuenta_nombre_tercero"
     techs = (c.table("technicians").select("id,name,active").eq("active", True).order("name").execute().data) or []
     plats = (c.table("delivery_platforms").select("id,name,code").eq("active", True).order("name").execute().data) or []
     return clients, techs, plats
@@ -124,6 +131,7 @@ if schema_has_service_modality and not schema_has_solo_licencia:
     )
 
 cid = {c["id"]: c["name"] for c in clients}
+client_default_mod = {str(c["id"]): c.get("default_service_modality") for c in clients if c.get("id")}
 tid = {t["id"]: t["name"] for t in techs}
 pid = {p["id"]: p["name"] for p in plats}
 
@@ -171,12 +179,18 @@ if can_create:
             platform_id = st.selectbox(
                 "Plataforma", options=[p["id"] for p in plats], format_func=lambda x: pid[x], key="na_p"
             )
+            default_mod = client_default_mod.get(str(client_id)) or "cuenta_nombre_tercero"
+            try:
+                default_mod_ix = SERVICE_MODALITY_ORDER.index(default_mod)
+            except ValueError:
+                default_mod_ix = 0
             modality_ix = st.selectbox(
                 "Modalidad de servicio",
                 options=list(range(len(SERVICE_MODALITY_ORDER))),
                 format_func=lambda i: SERVICE_MODALITY_LABELS[SERVICE_MODALITY_ORDER[i]],
                 help="Define si la cuenta es a nombre de tercero, cliente con licencia sin SSN, o con SSN y activación por cupo.",
                 disabled=not schema_has_service_modality,
+                index=default_mod_ix,
             )
             if schema_has_service_modality:
                 st.caption(SERVICE_MODALITY_HELP[SERVICE_MODALITY_ORDER[modality_ix]])
@@ -245,6 +259,11 @@ if can_create:
             ext = st.text_input("Referencia externa")
             req_notes = st.text_area("Notas de requisitos")
             rw = st.number_input("Monto alquiler semanal (solo si aplica)", min_value=0.0, value=0.0, step=1.0)
+            with st.container(border=True):
+                st.markdown("##### Social (SSN) y calidad")
+                na_social = st.checkbox("¿Ya se consiguió Social (SSN) para esta cuenta?", value=False, key="na_social")
+                na_ssn_last4 = st.text_input("SSN (últimos 4 dígitos)", max_chars=4, key="na_ssn4")
+                na_quality_ok = st.checkbox("Cuenta OK (lista para entregar)", value=False, key="na_quality_ok")
             submitted = st.form_submit_button("Crear cuenta")
         if submitted:
             from datetime import timezone
@@ -263,75 +282,90 @@ if can_create:
             elif solo_err:
                 st.error(solo_err)
             else:
-                payload = {
-                    "client_id": client_id,
-                    "platform_id": platform_id,
-                    "sale_type": sale_type,
-                    "status": status,
-                    "technician_id": technician_id,
-                    "external_ref": ext or None,
-                    "requirements_notes": req_notes or None,
-                }
-                if schema_has_service_modality:
-                    payload["service_modality"] = mod_key
-                if technician_id:
-                    payload["assigned_at"] = now
-                if sale_type == "alquiler" and rw and rw > 0:
-                    payload["rental_weekly_amount"] = float(rw)
-                try:
-                    ins = sb.table("accounts").insert(payload).execute()
-                    new_aid = str(ins.data[0]["id"])
+                act_err = None
+                if schema_has_service_modality and mod_key == "cliente_licencia_social_activacion_cupo":
+                    if not (st.session_state.get("na_ssn4") or "").strip():
+                        act_err = "Modalidad **activación por cupo**: ingresá el SSN (últimos 4)."
+                if act_err:
+                    st.error(act_err)
+                    payload = None
+                else:
+                    payload = {
+                        "client_id": client_id,
+                        "platform_id": platform_id,
+                        "sale_type": sale_type,
+                        "status": status,
+                        "technician_id": technician_id,
+                        "external_ref": ext or None,
+                        "requirements_notes": req_notes or None,
+                        "social_obtained": bool(st.session_state.get("na_social")),
+                        "ssn_last4": (st.session_state.get("na_ssn4") or "").strip() or None,
+                        "quality_ok": bool(st.session_state.get("na_quality_ok")),
+                    }
+                if payload is not None:
                     if schema_has_service_modality:
-                        link_id = na_tpi_pick if mod_key == TERCERO_MODALITY else None
-                        if mod_key == TERCERO_MODALITY and link_id:
-                            verr = validate_tercero_link(sb, new_aid, str(link_id))
-                            if verr:
-                                sb.table("accounts").delete().eq("id", new_aid).execute()
-                                st.error(verr)
-                                raise RuntimeError("rollback")
-                            apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
-                        else:
-                            apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
-                    if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
-                        ext_f = normalize_image_ext(na_sl_front.name)
-                        fp, bp_opt = storage_paths_for_account(new_aid, ext_f, None)
-                        storage_upload(
-                            token,
-                            fp,
-                            na_sl_front.getvalue(),
-                            na_sl_front.type or "image/jpeg",
-                        )
-                        back_path = None
-                        if na_sl_back:
-                            ext_b = normalize_image_ext(na_sl_back.name)
-                            back_path = back_storage_path(new_aid, ext_b)
+                        payload["service_modality"] = mod_key
+                    if technician_id:
+                        payload["assigned_at"] = now
+                    if sale_type == "alquiler" and rw and rw > 0:
+                        payload["rental_weekly_amount"] = float(rw)
+                    try:
+                        ins = sb.table("accounts").insert(payload).execute()
+                        new_aid = str(ins.data[0]["id"])
+
+                        if schema_has_service_modality:
+                            link_id = na_tpi_pick if mod_key == TERCERO_MODALITY else None
+                            if mod_key == TERCERO_MODALITY and link_id:
+                                verr = validate_tercero_link(sb, new_aid, str(link_id))
+                                if verr:
+                                    sb.table("accounts").delete().eq("id", new_aid).execute()
+                                    st.error(verr)
+                                    raise RuntimeError("rollback")
+                                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
+                            else:
+                                apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
+
+                        if schema_has_solo_licencia and mod_key == SOLO_LICENCIA_MODALITY:
+                            ext_f = normalize_image_ext(na_sl_front.name)
+                            fp, _ = storage_paths_for_account(new_aid, ext_f, None)
                             storage_upload(
                                 token,
-                                back_path,
-                                na_sl_back.getvalue(),
-                                na_sl_back.type or "image/jpeg",
+                                fp,
+                                na_sl_front.getvalue(),
+                                na_sl_front.type or "image/jpeg",
                             )
-                        upsert_solo_record(
-                            sb,
-                            new_aid,
-                            float(na_sl_price),
-                            na_sl_notes or None,
-                            fp,
-                            back_path,
-                        )
-                    st.cache_data.clear()
-                    msg = "Cuenta creada."
-                    if mod_key == TERCERO_MODALITY and na_tpi_pick:
-                        msg = "Cuenta creada y dato de tercero vinculado."
-                    elif mod_key == SOLO_LICENCIA_MODALITY:
-                        msg = "Cuenta creada con registro **solo licencia** (foto y precio)."
-                    st.success(msg)
-                    st.rerun()
-                except RuntimeError as re:
-                    if str(re) != "rollback":
-                        st.error(str(re))
-                except Exception as e:
-                    st.error(f"No se pudo crear: {e}")
+                            back_path = None
+                            if na_sl_back:
+                                ext_b = normalize_image_ext(na_sl_back.name)
+                                back_path = back_storage_path(new_aid, ext_b)
+                                storage_upload(
+                                    token,
+                                    back_path,
+                                    na_sl_back.getvalue(),
+                                    na_sl_back.type or "image/jpeg",
+                                )
+                            upsert_solo_record(
+                                sb,
+                                new_aid,
+                                float(na_sl_price),
+                                na_sl_notes or None,
+                                fp,
+                                back_path,
+                            )
+
+                        st.cache_data.clear()
+                        msg = "Cuenta creada."
+                        if mod_key == TERCERO_MODALITY and na_tpi_pick:
+                            msg = "Cuenta creada y dato de tercero vinculado."
+                        elif mod_key == SOLO_LICENCIA_MODALITY:
+                            msg = "Cuenta creada con registro **solo licencia** (foto y precio)."
+                        st.success(msg)
+                        st.rerun()
+                    except RuntimeError as re:
+                        if str(re) != "rollback":
+                            st.error(str(re))
+                    except Exception as e:
+                        st.error(f"No se pudo crear: {e}")
 else:
     st.caption("Los técnicos no crean cuentas nuevas desde la app; solo actualizan las asignadas.")
 
@@ -443,6 +477,26 @@ else:
         set_rental_due = st.checkbox("Fijar próximo vencimiento de alquiler")
         rental_due = st.date_input("Próximo vencimiento alquiler", value=None) if set_rental_due else None
         note_event = st.text_input("Nota del cambio (auditoría)")
+        with st.container(border=True):
+            st.markdown("##### Social (SSN) y calidad")
+            ua_social = st.checkbox(
+                "¿Se consiguió Social (SSN) para esta cuenta?",
+                value=bool(current.get("social_obtained") or False),
+                key=f"ua_social_{acc}",
+            )
+            ua_ssn4 = st.text_input(
+                "SSN (últimos 4)",
+                value=(current.get("ssn_last4") or ""),
+                max_chars=4,
+                key=f"ua_ssn4_{acc}",
+            )
+            ua_quality_ok = st.checkbox(
+                "Cuenta OK (lista para entregar)",
+                value=bool(current.get("quality_ok") or False),
+                key=f"ua_qok_{acc}",
+            )
+            if ua_quality_ok:
+                st.caption("Sugerencia: dejar el estado en **Requisitos OK** o **Entregada** cuando aplique.")
         show_sl = schema_has_solo_licencia and (
             cur_mod == SOLO_LICENCIA_MODALITY
             or SERVICE_MODALITY_ORDER[new_modality_ix] == SOLO_LICENCIA_MODALITY
@@ -510,6 +564,9 @@ else:
             upd = {"status": new_status, "technician_id": new_tech}
             if schema_has_service_modality:
                 upd["service_modality"] = new_mod
+            upd["social_obtained"] = bool(st.session_state.get(f"ua_social_{acc}"))
+            upd["ssn_last4"] = (st.session_state.get(f"ua_ssn4_{acc}") or "").strip() or None
+            upd["quality_ok"] = bool(st.session_state.get(f"ua_qok_{acc}"))
             from datetime import timezone
 
             if new_tech and not current.get("technician_id"):
@@ -568,5 +625,73 @@ else:
                 st.cache_data.clear()
                 st.success("Cuenta actualizada.")
                 st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo guardar: {e}")
+
+    # --- Ejecución técnica y credenciales ---
+    with st.expander("🧰 Ejecución técnica (teléfono, correo, claves)", expanded=False):
+        st.warning(
+            "Las **claves** se guardan en una tabla separada con RLS. Aun así, **quedan en texto plano** en la base. "
+            "Recomendación: guardarlas en un **password manager** y aquí solo dejar referencia."
+        )
+        if st.button("Refrescar ejecución", key=f"ref_exec_{acc}"):
+            st.cache_data.clear()
+            st.rerun()
+        # Carga on-demand (sin cache; datos sensibles)
+        try:
+            aed = (sb.table("account_execution_details").select("*").eq("account_id", acc).execute().data or [])
+            aed = aed[0] if aed else {}
+        except Exception:
+            aed = {}
+        try:
+            cred = (sb.table("account_credentials").select("*").eq("account_id", acc).execute().data or [])
+            cred = cred[0] if cred else {}
+        except Exception:
+            cred = {}
+
+        with st.form(f"exec_{acc}"):
+            ph = st.text_input("Teléfono usado", value=aed.get("phone_number") or "")
+            ps = st.selectbox(
+                "Origen del teléfono",
+                options=ACCOUNT_PHONE_SOURCE_ORDER,
+                format_func=lambda x: ACCOUNT_PHONE_SOURCE_LABELS.get(x, x),
+                index=ACCOUNT_PHONE_SOURCE_ORDER.index(aed.get("phone_source"))
+                if aed.get("phone_source") in ACCOUNT_PHONE_SOURCE_ORDER
+                else 0,
+            )
+            em = st.text_input("Correo creado para la cuenta", value=aed.get("email_created") or "")
+            st.divider()
+            email_login = st.text_input("Login del correo (si es distinto)", value=cred.get("email_login") or "")
+            email_pass = st.text_input("Clave del correo", value=cred.get("email_password") or "", type="password")
+            app_pass = st.text_input("Clave de la app/plataforma", value=cred.get("app_password") or "", type="password")
+            save_exec = st.form_submit_button("Guardar ejecución")
+        if save_exec:
+            try:
+                # upsert execution
+                ex = sb.table("account_execution_details").select("account_id").eq("account_id", acc).execute().data or []
+                payload = {
+                    "account_id": acc,
+                    "phone_number": ph.strip() or None,
+                    "phone_source": ps or None,
+                    "email_created": em.strip() or None,
+                }
+                if ex:
+                    sb.table("account_execution_details").update(payload).eq("account_id", acc).execute()
+                else:
+                    sb.table("account_execution_details").insert(payload).execute()
+
+                # upsert credentials
+                ex2 = sb.table("account_credentials").select("account_id").eq("account_id", acc).execute().data or []
+                payload2 = {
+                    "account_id": acc,
+                    "email_login": email_login.strip() or None,
+                    "email_password": email_pass or None,
+                    "app_password": app_pass or None,
+                }
+                if ex2:
+                    sb.table("account_credentials").update(payload2).eq("account_id", acc).execute()
+                else:
+                    sb.table("account_credentials").insert(payload2).execute()
+                st.success("Ejecución guardada.")
             except Exception as e:
                 st.error(f"No se pudo guardar: {e}")
