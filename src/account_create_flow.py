@@ -154,6 +154,12 @@ def render_account_create_form(
             if schema_has_service_modality and mod_key == TERCERO_MODALITY:
                 st.markdown("**Formulario A · Cuenta a nombre de tercero**")
                 st.caption("Obligatorio: asignar un dato **disponible** del inventario.")
+                client_face = st.file_uploader(
+                    "Foto del cliente solicitante (rostro) *",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=f"{key_prefix}_client_face",
+                    help="Foto que te envía el cliente (ej. José) para dejar evidencia de a quién se le asignó el dato.",
+                )
                 tpi_by_id = {str(r["id"]): r for r in tpi_rows}
                 ter_new_opts = [
                     r for r in tpi_rows if identity_selectable_for_new_account(r, str(r["id"]), links_by_i)
@@ -177,7 +183,7 @@ def render_account_create_form(
                 if tpi_pick:
                     cur = tpi_by_id.get(str(tpi_pick), {})
                     if not cur.get("portrait_photo_path"):
-                        st.error("A este dato le falta **foto de rostro (tipo carnet)**. Cargala en **Datos terceros** para poder asignarlo.")
+                        st.error("A este dato le falta **foto de rostro** del inventario. Cargala en **Datos terceros** para poder asignarlo.")
                     else:
                         # Preview: mostrar a quién se asigna (rostro + licencia)
                         with st.container(border=True):
@@ -440,16 +446,39 @@ def render_account_create_form(
         ins = sb.table("accounts").insert(payload).execute()
         new_aid = str(ins.data[0]["id"])
 
-        if schema_has_service_modality:
-            link_id = tpi_pick if mod_key == TERCERO_MODALITY else None
-            if mod_key == TERCERO_MODALITY and link_id:
+            if schema_has_service_modality:
+                link_id = tpi_pick if mod_key == TERCERO_MODALITY else None
+                if mod_key == TERCERO_MODALITY:
+                    if not client_face:
+                        sb.table("accounts").delete().eq("id", new_aid).execute()
+                        st.error("Falta **foto del cliente solicitante** (rostro). Subila para poder asignar el dato de tercero.")
+                        return AccountCreateResult(created=False)
+                    if not link_id:
+                        sb.table("accounts").delete().eq("id", new_aid).execute()
+                        st.error("Falta seleccionar el **dato de tercero** del inventario.")
+                        return AccountCreateResult(created=False)
+
+                    # Guardar foto del cliente solicitante en storage (si existe el helper)
+                    client_face_path = None
+                    try:
+                        ext_cf = normalize_image_ext(client_face.name)
+                        client_face_path = f"account-identity-links/{new_aid}/client_face.{ext_cf}"
+                        storage_upload(
+                            token,
+                            client_face_path,
+                            client_face.getvalue(),
+                            client_face.type or "image/jpeg",
+                        )
+                    except Exception:
+                        client_face_path = None
+
                 verr = validate_tercero_link(sb, new_aid, str(link_id))
                 if verr:
                     sb.table("accounts").delete().eq("id", new_aid).execute()
                     st.error(verr)
                     return AccountCreateResult(created=False)
-                apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id))
-            else:
+                    apply_account_tercero_identity(sb, new_aid, mod_key, str(link_id), client_face_path)
+                else:
                 apply_account_tercero_identity(sb, new_aid, mod_key or "cuenta_nombre_tercero", None)
 
         if schema_has_solo_licencia and schema_has_service_modality and mod_key == SOLO_LICENCIA_MODALITY:

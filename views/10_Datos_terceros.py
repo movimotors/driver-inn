@@ -450,7 +450,12 @@ if edit_ok:
                 with f2:
                     up_b = st.file_uploader("Licencia · Dorso", type=["jpg", "jpeg", "png", "webp"], key="nb")
                 with f3:
-                    up_portrait = st.file_uploader("Rostro (tipo carnet) *", type=["jpg", "jpeg", "png", "webp"], key="np")
+                    up_portrait = st.file_uploader(
+                        "Rostro (tipo carnet)",
+                        type=["jpg", "jpeg", "png", "webp"],
+                        key="np",
+                        help="Foto del rostro de la identidad del inventario (si la tenés). La foto del cliente solicitante se carga al crear la cuenta.",
+                    )
 
             with st.container(border=True):
                 _card_start(
@@ -513,13 +518,13 @@ if edit_ok:
                         pb = f"{new_id}/back.{ext_b}"
                         storage_upload(token, pb, up_b.getvalue(), up_b.type or "image/jpeg")
                         sb.table("third_party_identities").update({"photo_back_path": pb}).eq("id", new_id).execute()
-                        if up_portrait:
-                            ext_p = (up_portrait.name.rsplit(".", 1)[-1] if "." in up_portrait.name else "jpg").lower()
-                            if ext_p == "jpeg":
-                                ext_p = "jpg"
-                            pp = f"{new_id}/portrait.{ext_p}"
-                            storage_upload(token, pp, up_portrait.getvalue(), up_portrait.type or "image/jpeg")
-                            sb.table("third_party_identities").update({"portrait_photo_path": pp}).eq("id", new_id).execute()
+                    if up_portrait:
+                        ext_p = (up_portrait.name.rsplit(".", 1)[-1] if "." in up_portrait.name else "jpg").lower()
+                        if ext_p == "jpeg":
+                            ext_p = "jpg"
+                        pp = f"{new_id}/portrait.{ext_p}"
+                        storage_upload(token, pp, up_portrait.getvalue(), up_portrait.type or "image/jpeg")
+                        sb.table("third_party_identities").update({"portrait_photo_path": pp}).eq("id", new_id).execute()
                     st.cache_data.clear()
                     st.success("Registro creado en inventario. Vinculá la cuenta desde **Cuentas** o **Clientes**.")
                     st.rerun()

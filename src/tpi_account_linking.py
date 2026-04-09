@@ -124,11 +124,20 @@ def validate_tercero_link(sb, account_id: str, identity_id: str) -> str | None:
     return None
 
 
-def apply_account_tercero_identity(sb, account_id: str, service_modality: str, identity_id: str | None) -> None:
+def apply_account_tercero_identity(
+    sb,
+    account_id: str,
+    service_modality: str,
+    identity_id: str | None,
+    client_face_photo_path: str | None = None,
+) -> None:
     """Quita vínculos de la cuenta y, si aplica, crea el vínculo al dato de tercero."""
     sb.table("account_identity_links").delete().eq("account_id", account_id).execute()
     if service_modality == TERCERO_MODALITY and identity_id:
-        sb.table("account_identity_links").insert({"account_id": account_id, "identity_id": identity_id}).execute()
+        row = {"account_id": account_id, "identity_id": identity_id}
+        if client_face_photo_path:
+            row["client_face_photo_path"] = client_face_photo_path
+        sb.table("account_identity_links").insert(row).execute()
 
 
 def current_tercero_identity_id(sb, account_id: str) -> str | None:
